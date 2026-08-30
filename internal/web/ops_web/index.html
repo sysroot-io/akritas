@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Akritas</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1014;
+      --panel: #121a20;
+      --panel-2: #182229;
+      --line: #293842;
+      --text: #e7edf1;
+      --muted: #93a5b0;
+      --accent: #5bd1a5;
+      --accent-2: #2b8f70;
+      --danger: #f08c82;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 12% 8%, rgba(43,143,112,.18), transparent 30rem),
+        var(--bg);
+      color: var(--text);
+      font: 15px/1.5 Inter, ui-sans-serif, system-ui, sans-serif;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 18px 24px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(11,16,20,.82);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 3;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .mark {
+      width: 34px; height: 34px; border-radius: 10px;
+      display: grid; place-items: center;
+      color: #07120e; background: var(--accent); font-weight: 900;
+      box-shadow: 0 0 28px rgba(91,209,165,.25);
+    }
+    h1 { margin: 0; font-size: 18px; letter-spacing: .02em; }
+    .subtitle { color: var(--muted); font-size: 12px; }
+    .header-tools { display: flex; align-items: center; gap: 10px; }
+    .status { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .status.ok { color: var(--accent); }
+    main { max-width: 1180px; margin: 0 auto; padding: 26px 22px 44px; }
+    nav { display: flex; gap: 8px; margin-bottom: 18px; }
+    button, input, textarea, select { font: inherit; }
+    button {
+      border: 1px solid var(--line); border-radius: 9px;
+      padding: 9px 14px; color: var(--text); background: var(--panel-2);
+      cursor: pointer;
+    }
+    button:hover { border-color: var(--accent-2); }
+    button.primary { color: #07120e; border-color: var(--accent); background: var(--accent); font-weight: 700; }
+    button:disabled { opacity: .55; cursor: wait; }
+    nav button.active { border-color: var(--accent); color: var(--accent); }
+    .view { display: none; }
+    .view.active { display: block; }
+    .panel {
+      border: 1px solid var(--line); border-radius: 14px;
+      background: rgba(18,26,32,.92); overflow: hidden;
+    }
+    .panel-head { padding: 15px 18px; border-bottom: 1px solid var(--line); }
+    .panel-head h2 { margin: 0 0 3px; font-size: 16px; }
+    .hint { color: var(--muted); font-size: 13px; }
+    #messages { min-height: 420px; max-height: 62vh; overflow-y: auto; padding: 18px; }
+    .message { display: grid; grid-template-columns: 82px 1fr; gap: 12px; margin-bottom: 18px; }
+    .role { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; padding-top: 4px; }
+    .message.user .role { color: var(--accent); }
+    .content { overflow-wrap: anywhere; }
+    .content > :first-child { margin-top: 0; }
+    .content > :last-child { margin-bottom: 0; }
+    .content p { margin: 0 0 10px; white-space: pre-wrap; }
+    .content h1, .content h2, .content h3, .content h4, .content h5, .content h6 { margin: 16px 0 8px; line-height: 1.25; }
+    .content h1 { font-size: 20px; } .content h2 { font-size: 18px; } .content h3 { font-size: 16px; }
+    .content ul, .content ol { margin: 6px 0 12px; padding-left: 25px; }
+    .content li { margin: 4px 0; }
+    .content code { padding: 2px 5px; border-radius: 5px; background: #0a1115; font: 13px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .content pre { margin: 10px 0 14px; padding: 12px; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: #0a1115; }
+    .content pre code { padding: 0; background: transparent; white-space: pre; }
+    .content blockquote { margin: 10px 0; padding-left: 12px; border-left: 3px solid var(--accent-2); color: var(--muted); }
+    .message.user .content { white-space: pre-wrap; }
+    .composer { padding: 14px; border-top: 1px solid var(--line); }
+    textarea, input, select {
+      width: 100%; color: var(--text); background: #0d1419;
+      border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px;
+      outline: none;
+    }
+    textarea:focus, input:focus, select:focus { border-color: var(--accent-2); }
+    textarea { resize: vertical; min-height: 92px; }
+    .composer-actions, .form-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 10px; }
+	.approval { padding: 0 18px 18px; border-top: 1px solid var(--line); }
+	.approval .hint { margin: 12px 0; }
+	.approval.applied { color: var(--accent); }
+    label.check { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+    label.check input { width: auto; accent-color: var(--accent); }
+    #activity { padding: 0 18px 16px; }
+    .activity-title { margin-top: 12px; color: var(--text); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+    .activity-item { margin-top: 8px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); font: 12px/1.45 ui-monospace, monospace; white-space: pre-wrap; }
+    .activity-item.gap { border-color: rgba(240,140,130,.45); color: #e8b0aa; }
+    .grid { display: grid; grid-template-columns: minmax(300px,.8fr) minmax(380px,1.2fr); gap: 18px; }
+    .form { padding: 18px; }
+    .field { margin-bottom: 15px; }
+    .field label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 13px; }
+    #change-result { margin: 0; min-height: 510px; padding: 18px; overflow: auto; color: var(--text); font: 14px/1.55 Inter, ui-sans-serif, system-ui, sans-serif; }
+	.diagnostic { margin: 12px 0; padding: 12px; border: 1px solid rgba(240,140,130,.45); border-radius: 8px; color: var(--text); }
+	.diagnostic-title { color: var(--danger); font-weight: 700; }
+	.diagnostic-meta { margin-top: 5px; color: var(--muted); font: 12px/1.5 ui-monospace, monospace; }
+	.diagnostic details { margin-top: 9px; }
+	.diagnostic summary { color: var(--muted); cursor: pointer; }
+	.diagnostic pre { max-height: 320px; }
+	.diagnostic-actions { display: flex; align-items: center; gap: 8px; margin-top: 9px; }
+	.diagnostic-actions button { padding: 6px 10px; font-size: 12px; }
+    .error { color: var(--danger); }
+    .api-key { width: 210px; padding: 7px 10px; font-size: 12px; }
+    @media (max-width: 780px) {
+      header { align-items: flex-start; flex-direction: column; }
+      .header-tools { width: 100%; }
+      .api-key { flex: 1; }
+      .grid { grid-template-columns: 1fr; }
+      .message { grid-template-columns: 1fr; gap: 3px; }
+      #messages { min-height: 340px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="mark">O</div>
+      <div><h1>Akritas</h1><div class="subtitle">operations assistant with approved changes</div></div>
+    </div>
+    <div class="header-tools">
+      <input id="api-key" class="api-key" type="password" placeholder="API key, если нужен" autocomplete="off">
+      <span id="status" class="status">проверка…</span>
+    </div>
+  </header>
+  <main>
+    <nav>
+      <button class="active" data-view="chat">Chat</button>
+      <button data-view="change">Prepare change</button>
+    </nav>
+
+    <section id="view-chat" class="view active">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Операционный чат</h2>
+          <div class="hint">Общие вопросы, RAG и разрешённые read-only MCP-инструменты.</div>
+        </div>
+        <div id="messages"><div class="hint">Задайте вопрос о документации, инциденте, логах, метриках или конфигурации.</div></div>
+        <div id="activity"></div>
+        <div class="composer">
+          <textarea id="chat-input" placeholder="Например: найди ранбук для высокой latency и перечисли первые диагностические шаги"></textarea>
+          <div class="composer-actions">
+            <label class="check"><input id="debug" type="checkbox"> показывать payload в следующем ответе</label>
+            <button id="send-chat" class="primary">Отправить</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-change" class="view">
+      <div class="grid">
+        <div class="panel">
+          <div class="panel-head"><h2>Подготовка изменения</h2><div class="hint">Только анализ снимка; файлы не изменяются.</div></div>
+          <div class="form">
+            <div class="field"><label for="workspace">Workspace</label><select id="workspace"></select></div>
+            <div class="field"><label for="change-request">Запрос</label><textarea id="change-request">Нужно разрешить новый backend orders-v2 через nftables в production.</textarea></div>
+            <div class="field">
+			  <label for="change-files">Файлы (необязательно), по одному относительному пути на строку</label>
+			  <textarea id="change-files" placeholder="Оставьте пустым: Akritas сам найдёт подходящие файлы"></textarea>
+            </div>
+            <div class="form-actions"><span class="hint">Без MCP, shell и Git.</span><button id="run-change" class="primary">Подготовить diff</button></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Проверенное предложение</h2><div class="hint">Preview ничего не меняет; запись возможна только после отдельного approval.</div></div>
+          <div id="change-result" class="content"><p>Результат появится здесь.</p></div>
+		  <div id="change-approval" class="approval" hidden></div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script>
+	const state = { messages: [], pendingApproval: null };
+    const byId = id => document.getElementById(id);
+    const authHeaders = () => {
+      const key = byId('api-key').value.trim();
+      return key ? { Authorization: `Bearer ${key}` } : {};
+    };
+    async function api(path, options = {}) {
+      const response = await fetch(path, {
+        ...options,
+        headers: { 'Content-Type': 'application/json', ...authHeaders(), ...(options.headers || {}) }
+      });
+      const body = await response.json().catch(() => ({}));
+	  if (!response.ok) {
+		const error = new Error(body?.error?.message || `HTTP ${response.status}`);
+		error.details = body?.error?.details || null; throw error;
+	  }
+      return body;
+    }
+    function setBusy(button, busy) { button.disabled = busy; button.dataset.label ||= button.textContent; button.textContent = busy ? 'Ожидание…' : button.dataset.label; }
+    function appendInlineMarkdown(root, value) {
+      const pattern = /(`[^`]+`|\*\*[^*]+\*\*)/g; let offset = 0;
+      for (const match of value.matchAll(pattern)) {
+        root.append(document.createTextNode(value.slice(offset, match.index)));
+        const token = match[0]; const node = document.createElement(token.startsWith('`') ? 'code' : 'strong');
+        node.textContent = token.startsWith('`') ? token.slice(1, -1) : token.slice(2, -2); root.append(node);
+        offset = match.index + token.length;
+      }
+      root.append(document.createTextNode(value.slice(offset)));
+    }
+    function renderMarkdown(root, content) {
+      const lines = content.replace(/\r\n?/g, '\n').split('\n'); let paragraph = []; let list = null; let fence = null;
+      const flushParagraph = () => {
+        if (!paragraph.length) return;
+        const node = document.createElement('p'); appendInlineMarkdown(node, paragraph.join('\n')); root.append(node); paragraph = [];
+      };
+      const closeList = () => { list = null; };
+      const appendListItem = (type, value) => {
+        flushParagraph();
+        if (!list || list.tagName.toLowerCase() !== type) { closeList(); list = document.createElement(type); root.append(list); }
+        const item = document.createElement('li'); appendInlineMarkdown(item, value); list.append(item);
+      };
+      for (const line of lines) {
+        if (fence) {
+          if (/^\s*```/.test(line)) { const pre = document.createElement('pre'); const code = document.createElement('code'); code.textContent = fence.lines.join('\n'); pre.append(code); root.append(pre); fence = null; }
+          else fence.lines.push(line);
+          continue;
+        }
+        const fenceStart = line.match(/^\s*```([^`]*)$/);
+        if (fenceStart) { flushParagraph(); closeList(); fence = { language: fenceStart[1].trim(), lines: [] }; continue; }
+        const heading = line.match(/^(#{1,6})\s+(.+)$/);
+        if (heading) { flushParagraph(); closeList(); const node = document.createElement(`h${heading[1].length}`); appendInlineMarkdown(node, heading[2]); root.append(node); continue; }
+        const unordered = line.match(/^\s*[-*+]\s+(.+)$/);
+        if (unordered) { appendListItem('ul', unordered[1]); continue; }
+        const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+        if (ordered) { appendListItem('ol', ordered[1]); continue; }
+        const quote = line.match(/^>\s?(.*)$/);
+        if (quote) { flushParagraph(); closeList(); const node = document.createElement('blockquote'); appendInlineMarkdown(node, quote[1]); root.append(node); continue; }
+        if (!line.trim()) { flushParagraph(); closeList(); continue; }
+        closeList(); paragraph.push(line);
+      }
+      if (fence) { const pre = document.createElement('pre'); const code = document.createElement('code'); code.textContent = fence.lines.join('\n'); pre.append(code); root.append(pre); }
+      flushParagraph();
+    }
+    function renderMessage(role, content) {
+      const empty = byId('messages').querySelector('.hint'); if (empty) empty.remove();
+      const box = document.createElement('div'); box.className = `message ${role}`;
+      const label = document.createElement('div'); label.className = 'role'; label.textContent = role === 'user' ? 'Вы' : 'Akritas';
+      const text = document.createElement('div'); text.className = 'content';
+      if (role === 'assistant') renderMarkdown(text, content); else text.textContent = content;
+      box.append(label, text); byId('messages').append(box); byId('messages').scrollTop = byId('messages').scrollHeight;
+    }
+    function renderActivity(items, gaps, debug) {
+      const root = byId('activity'); root.replaceChildren();
+      const title = value => { const node = document.createElement('div'); node.className = 'activity-title'; node.textContent = value; root.append(node); };
+      const addItem = (text, className = '') => { const node = document.createElement('div'); node.className = `activity-item ${className}`.trim(); node.textContent = text; root.append(node); };
+      const reports = (items || []).filter(item => item.name === 'local.capability.report_missing');
+      const executed = (items || []).filter(item => item.name !== 'local.capability.report_missing');
+      title('Выполненные инструменты');
+      if (!executed.length) addItem('Диагностические инструменты не вызывались.');
+      for (const item of executed) {
+        const node = document.createElement('div'); node.className = 'activity-item';
+        let text = `${item.name} · ${item.status} · ${item.id}`;
+        if (item.arguments) text += `\narguments: ${JSON.stringify(item.arguments)}`;
+        if (item.result) text += `\nresult: ${JSON.stringify(item.result)}`;
+        if (debug && !item.arguments && !item.result) text += '\npayload не возвращён сервером';
+        node.textContent = text; root.append(node);
+      }
+      title('Недостающие инструменты');
+      if (!(gaps || []).length) addItem(reports.length ? 'Отчёт не содержит подтверждённых пробелов.' : 'Модель не сообщила о недостающих инструментах.', 'gap');
+      for (const gap of gaps || []) addItem(`${gap.capability}\nшаг: ${gap.step}\nпричина: ${gap.reason}`, 'gap');
+      if (debug && reports.length) {
+        title('Служебный отчёт модели');
+        for (const item of reports) addItem(`${item.name} · ${item.status} · ${item.id}\narguments: ${JSON.stringify(item.arguments || {})}\nresult: ${JSON.stringify(item.result || {})}`);
+      }
+    }
+    async function sendChat() {
+      const input = byId('chat-input'); const value = input.value.trim(); if (!value) return;
+      state.messages.push({ role: 'user', content: value }); renderMessage('user', value); input.value = '';
+      const button = byId('send-chat'); setBusy(button, true);
+      try {
+        const result = await api('/api/v1/chat', { method: 'POST', body: JSON.stringify({ messages: state.messages, debug: byId('debug').checked }) });
+        state.messages.push({ role: 'assistant', content: result.answer }); renderMessage('assistant', result.answer); renderActivity(result.activity, result.capability_gaps, byId('debug').checked);
+      } catch (error) { renderMessage('assistant', `Ошибка: ${error.message}`); }
+      finally { setBusy(button, false); }
+    }
+    async function loadWorkspaces() {
+      try {
+        const result = await api('/api/v1/workspaces'); const select = byId('workspace'); select.replaceChildren();
+        for (const name of result.workspaces || []) { const option = document.createElement('option'); option.value = name; option.textContent = name; select.append(option); }
+        if (!select.options.length) { const option = document.createElement('option'); option.textContent = 'Нет разрешённых workspace'; option.value = ''; select.append(option); }
+      } catch (error) { byId('change-result').textContent = `Не удалось загрузить workspace: ${error.message}`; }
+    }
+    async function runChange() {
+	  const button = byId('run-change'); const output = byId('change-result'); const approval = byId('change-approval');
+	  state.pendingApproval = null; approval.hidden = true; approval.replaceChildren();
+	  setBusy(button, true); output.classList.remove('error'); output.style.whiteSpace = ''; output.textContent = 'Akritas ищет файлы и готовит изменение…';
+      try {
+        const files = byId('change-files').value.split('\n').map(x => x.trim()).filter(Boolean);
+        const result = await api('/api/v1/change/simulations', { method: 'POST', body: JSON.stringify({ workspace: byId('workspace').value, request: byId('change-request').value, files }) });
+        output.replaceChildren(); renderMarkdown(output, result.answer);
+		if (result.approval) renderChangeApproval(result.approval, result.result?.changed_files || []);
+	  } catch (error) {
+		output.classList.add('error');
+		if (error.details) renderChangeDiagnostics(output, error.message, error.details);
+		else output.textContent = `Ошибка: ${error.message}`;
+	  }
+      finally { setBusy(button, false); }
+    }
+	function renderChangeDiagnostics(root, message, diagnostics) {
+	  root.style.whiteSpace = ''; root.replaceChildren();
+	  const heading = document.createElement('h3'); heading.textContent = 'Ошибка подготовки изменения'; root.append(heading);
+	  const summary = document.createElement('p'); summary.textContent = message; root.append(summary);
+	  for (const item of diagnostics || []) {
+		const box = document.createElement('div'); box.className = 'diagnostic';
+		const title = document.createElement('div'); title.className = 'diagnostic-title'; title.textContent = `Попытка ${item.attempt}: ${item.stage}`;
+		const reason = document.createElement('div'); reason.textContent = item.error || 'Неизвестная ошибка';
+		const meta = document.createElement('div'); meta.className = 'diagnostic-meta';
+		meta.textContent = [`finish: ${item.finish_reason || 'не указан'}`, `tokens: ${item.completion_tokens || 'не указано'}`, `tool: ${item.tool_name || 'не указан'}`, `arguments: ${item.argument_bytes || 0} bytes`].join(' · ');
+		box.append(title, reason, meta);
+		if (item.hint) { const hint = document.createElement('div'); hint.className = 'hint'; hint.textContent = item.hint; box.append(hint); }
+		const rawArguments = item.arguments || item.arguments_preview;
+		if (rawArguments) {
+		  let displayedArguments = rawArguments;
+		  try { displayedArguments = JSON.stringify(JSON.parse(rawArguments), null, 2); } catch (_) {}
+		  const details = document.createElement('details'); const label = document.createElement('summary');
+		  label.textContent = item.arguments ? 'Показать полный structured proposal' : 'Показать сокращённый ответ модели';
+		  const pre = document.createElement('pre'); const code = document.createElement('code'); code.textContent = displayedArguments; pre.append(code); details.append(label, pre); box.append(details);
+		  if (item.arguments) {
+			const actions = document.createElement('div'); actions.className = 'diagnostic-actions';
+			const download = document.createElement('button'); download.type = 'button'; download.textContent = 'Скачать proposal.json';
+			download.addEventListener('click', () => downloadTextFile(`akritas-proposal-attempt-${item.attempt || 'unknown'}.json`, displayedArguments + '\n', 'application/json'));
+			actions.append(download); box.append(actions);
+		  }
+		}
+		root.append(box);
+	  }
+	}
+	function downloadTextFile(filename, content, type) {
+	  const url = URL.createObjectURL(new Blob([content], { type }));
+	  const link = document.createElement('a'); link.href = url; link.download = filename; document.body.append(link); link.click(); link.remove();
+	  setTimeout(() => URL.revokeObjectURL(url), 0);
+	}
+	function renderChangeApproval(pending, files) {
+	  state.pendingApproval = pending; const root = byId('change-approval'); root.hidden = false; root.classList.remove('applied'); root.replaceChildren();
+	  const hint = document.createElement('div'); hint.className = 'hint';
+	  hint.textContent = `Будут изменены: ${files.join(', ')}. Preview действует до ${new Date(pending.expires_at).toLocaleString()}.`;
+	  const button = document.createElement('button'); button.className = 'primary'; button.textContent = 'Применить этот diff';
+	  button.addEventListener('click', () => applyChange(button)); root.append(hint, button);
+	}
+	async function applyChange(button) {
+	  const pending = state.pendingApproval; if (!pending) return;
+	  if (!window.confirm('Применить показанный diff к выбранному workspace? Это изменит файлы на диске.')) return;
+	  setBusy(button, true);
+	  try {
+		const result = await api(`/api/v1/change/simulations/${encodeURIComponent(pending.id)}/apply`, { method: 'POST', body: JSON.stringify({ confirm: true }) });
+		state.pendingApproval = null; const root = byId('change-approval'); root.classList.add('applied'); root.replaceChildren();
+		const message = document.createElement('div'); message.className = 'hint'; message.textContent = `Изменение применено: ${(result.changed_files || []).join(', ')}. Проверьте результат и создайте commit/MR.`; root.append(message);
+	  } catch (error) {
+		state.pendingApproval = null; button.disabled = true; button.textContent = 'Нужен новый preview';
+		alert(`Не удалось применить diff: ${error.message}. Подготовьте новый preview перед повторной попыткой.`);
+	  }
+	}
+    document.querySelectorAll('nav button').forEach(button => button.addEventListener('click', () => {
+      document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x === button));
+      document.querySelectorAll('.view').forEach(x => x.classList.toggle('active', x.id === `view-${button.dataset.view}`));
+      if (button.dataset.view === 'change') loadWorkspaces();
+    }));
+    byId('send-chat').addEventListener('click', sendChat);
+    byId('chat-input').addEventListener('keydown', event => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) sendChat(); });
+    byId('run-change').addEventListener('click', runChange);
+    byId('api-key').addEventListener('change', loadWorkspaces);
+    fetch('/health').then(r => r.json()).then(data => { byId('status').textContent = `${data.model} · ${data.tools} tools`; byId('status').classList.add('ok'); }).catch(() => { byId('status').textContent = 'недоступен'; });
+  </script>
+</body>
+</html>

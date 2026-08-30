@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "validators": ["go-vet", "yamllint"],
+  "workspaces": [
+    {
+      "name": "nftables",
+      "root": "../../testdata/ops-change/nftables"
+    },
+    {
+      "name": "backend",
+      "root": "../../workspaces/backend",
+      "validators": ["go-test"],
+      "validator_mode": "append"
+    },
+    {
+      "name": "go-only",
+      "root": "../../workspaces/go-only",
+      "validators": ["go-vet", "go-test"],
+      "validator_mode": "replace"
+    }
+  ]
+}

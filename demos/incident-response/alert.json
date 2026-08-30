@@ -1,0 +1,22 @@
+{
+  "version": "4",
+  "groupKey": "{}:{alertname=\"HighCPU\",instance=\"api-01\"}",
+  "truncatedAlerts": 0,
+  "status": "firing",
+  "receiver": "akritas-demo",
+  "groupLabels": {"alertname": "HighCPU"},
+  "commonLabels": {"severity": "critical"},
+  "commonAnnotations": {"summary": "CPU usage is above 95%"},
+  "routeLabels": {"team": "platform"},
+  "externalURL": "http://alertmanager:9093",
+  "alerts": [{
+    "status": "firing",
+    "labels": {"alertname": "HighCPU", "instance": "api-01"},
+    "annotations": {"description": "CPU above 95% for 10 minutes"},
+    "startsAt": "2026-08-23T10:00:00Z",
+    "endsAt": "0001-01-01T00:00:00Z",
+    "generatorURL": "http://prometheus:9090/graph",
+    "fingerprint": "demo-high-cpu-api-01"
+  }]
+}
+

@@ -1,0 +1,10 @@
+/bin/
+/.gocache/
+/.tmp/
+/*.exe
+/configs/akritas/*.local.json
+/data/
+/workspaces/
+/.env
+/docs/P0_READINESS.md
+/AGENTS.md

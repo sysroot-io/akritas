@@ -1,0 +1,15 @@
+backends:
+  orders-v1:
+    address: 10.20.4.10
+    port: 8443
+    environment: production
+    allowed_sources:
+      - frontend
+
+  orders-v2:
+    address: 10.20.4.15
+    port: 8443
+    environment: production
+    allowed_sources:
+      - frontend
+    firewall_access: pending

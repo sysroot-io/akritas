@@ -1,0 +1,41 @@
+services:
+  akritas:
+    build:
+      context: .
+    command:
+      - serve
+      - -address
+      - 0.0.0.0:8090
+      - -base-url
+      - ${AKRITAS_UPSTREAM_BASE_URL:-http://host.docker.internal:8080/v1}
+      - -upstream-model
+      - ${AKRITAS_UPSTREAM_MODEL:-}
+      - -audit-log
+      - /var/lib/akritas/audit/akritas.jsonl
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      AKRITAS_API_KEY: ${AKRITAS_API_KEY:?set AKRITAS_API_KEY in .env}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - 127.0.0.1:8090:8090
+    read_only: true
+    tmpfs:
+      - /tmp:mode=0700,uid=10001,gid=10001
+    volumes:
+      - akritas-audit:/var/lib/akritas/audit
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8090/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  akritas-audit:
+

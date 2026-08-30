@@ -1,0 +1,9 @@
+.git
+.gocache
+.tmp
+bin
+data
+workspaces
+configs/akritas/*.local.json
+.env
+
