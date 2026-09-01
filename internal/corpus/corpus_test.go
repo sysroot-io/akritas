@@ -11,7 +11,7 @@ import (
 
 func TestCorpusShardsRoundTripAndResume(t *testing.T) {
 	documents := []CorpusDocument{
-		{ID: "doc-1", Text: strings.Repeat("Первый документ. ", 5), Source: "test"},
+		{ID: "doc-1", Text: strings.Repeat("First document. ", 5), Source: "test"},
 		{ID: "doc-2", Text: strings.Repeat("Second document. ", 5), Source: "test"},
 		{ID: "doc-3", Text: strings.Repeat("第三个文档。", 8), Source: "test"},
 	}

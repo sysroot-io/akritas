@@ -4,6 +4,7 @@ import (
 	"log"
 
 	"akritas/internal/audit"
+	"akritas/internal/investigation"
 )
 
 type opsAuditRun struct {
@@ -49,12 +50,21 @@ func (run *opsAuditRun) addEvent(eventType, status string, metadata map[string]s
 func (run *opsAuditRun) addToolEvents(result openAIToolLoopResult) {
 	for index, call := range result.Calls {
 		status := "succeeded"
-		metadata := map[string]string{"tool": call.Name}
+		metadata := map[string]string{"tool": call.Name, "call_id": call.ID}
 		if index < len(result.Results) && result.Results[index].Error != nil {
 			status = "failed"
 			metadata["error_code"] = result.Results[index].Error.Code
 		}
 		run.addEvent("tool_call", status, metadata)
+	}
+}
+
+func (run *opsAuditRun) setInvestigationResult(result investigation.Result) {
+	if run == nil || run.store == nil || run.runID == "" || run.finished {
+		return
+	}
+	if err := run.store.SetInvestigationResult(run.runID, result); err != nil {
+		log.Printf("level=error component=akritas audit=investigation run_id=%q error=%q", run.runID, err)
 	}
 }
 

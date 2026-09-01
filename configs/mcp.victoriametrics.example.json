@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "servers": [
+    {
+      "name": "victoriametrics",
+      "command": "/usr/local/bin/akritas",
+      "args": [
+        "mcp-victoriametrics",
+        "-base-url",
+        "http://victoriametrics:8428/prometheus",
+        "-bearer-token-env",
+        "VICTORIAMETRICS_BEARER_TOKEN"
+      ],
+      "allow": [
+        "read"
+      ],
+      "timeout_ms": 20000
+    }
+  ]
+}

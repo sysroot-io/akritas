@@ -2,7 +2,7 @@
 
 [![CI and Security](https://github.com/sysroot-io/Akritas/actions/workflows/ci.yml/badge.svg)](https://github.com/sysroot-io/Akritas/actions/workflows/ci.yml)
 [![Documentation](https://img.shields.io/badge/docs-akritas.sysroot.io-2563eb)](https://akritas.sysroot.io/)
-[![Go 1.22+](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![Go 1.25+](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 
 Akritas is a standalone host for LLM-powered operational automation. It accepts
 requests from people and Alertmanager, searches local context, invokes authorized
@@ -20,7 +20,7 @@ outcomes, but omit prompts, tool payloads, model output, and credentials.
 
 ## Build and Test
 
-Go 1.22 or later is required. The module selects the security-patched Go 1.26.6 toolchain by default.
+Go 1.25 or later is required. The module selects the security-patched Go 1.26.6 toolchain by default.
 
 ```bash
 go test ./...
@@ -32,10 +32,13 @@ Basic startup with a local `llama-server`:
 ```bash
 ./bin/akritas serve \
   -address 127.0.0.1:8090 \
-  -base-url http://127.0.0.1:8080/v1
+  -base-url http://127.0.0.1:8080/v1 \
+  -response-language en
 ```
 
 After startup, the Web UI is available at `http://127.0.0.1:8090/`.
+`-response-language` accepts a BCP 47 tag such as `ru`, `fr`, `ja`, or
+`pt-BR` and controls model-generated prose only. The Web UI remains English.
 
 The upstream can be replaced without rebuilding Akritas: any OpenAI-compatible
 `/v1` endpoint is sufficient. For OpenRouter, set a key and explicitly select a
@@ -80,6 +83,32 @@ A version-controlled workspace configuration example is available at
 `configs/akritas/workspaces.example.json`. Local configurations containing
 internal paths or credentials are excluded from Git.
 
+## VictoriaMetrics MCP
+
+Akritas includes a read-only stdio MCP server for VictoriaMetrics. It exposes
+bounded instant queries, range queries, series discovery, label discovery, and
+label-value discovery. The operator fixes the endpoint, tenant, credentials,
+HTTP timeout, and response-size limit when starting the MCP process.
+
+```bash
+export VICTORIAMETRICS_BEARER_TOKEN='example-token'
+./bin/akritas serve \
+  -base-url http://127.0.0.1:8080/v1 \
+  -mcp-config configs/mcp.victoriametrics.example.json
+```
+
+The example expects the binary at `/usr/local/bin/akritas`; adjust `command`
+for a local build. For VictoriaMetrics cluster mode, set the MCP `-base-url` to
+the tenant read root, for example
+`http://vmselect:8481/select/0/prometheus`. Credentials are read from a named
+environment variable and are never accepted as model-controlled tool arguments.
+
+Add `-debug` to the `mcp-victoriametrics` arguments while diagnosing an
+integration. Failed HTTP responses then log their status, content type, and a
+2 KiB body preview to stderr. Request headers, credentials, query arguments,
+and successful response bodies are not logged. Disable the flag after
+troubleshooting because error bodies can contain operational data.
+
 ## Interfaces
 
 - Web UI and native API: `http://127.0.0.1:8090/`;
@@ -87,6 +116,7 @@ internal paths or credentials are excluded from Git.
 - Alertmanager webhook: `POST /api/v1/alertmanager/webhook`;
 - upstream LLM: any compatible `/v1`, including llama.cpp and OpenRouter;
 - external actions: MCP stdio servers with an explicit permissions policy;
+- metrics: bundled read-only VictoriaMetrics MCP adapter;
 - changes: isolated preview, validators, and one-time approval;
 - audit: authenticated `/api/v1/runs` list and detail endpoints.
 

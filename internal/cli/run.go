@@ -27,6 +27,8 @@ func Run(arguments []string) int {
 		runInspectRAGIndex(arguments[1:])
 	case "list-rag-documents":
 		runListRAGDocuments(arguments[1:])
+	case "mcp-victoriametrics":
+		runVictoriaMetricsMCP(arguments[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n", arguments[0])
 		printUsage()
@@ -36,5 +38,5 @@ func Run(arguments []string) int {
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "usage: akritas <serve|simulate-change|import-local|build-corpus|build-rag-index|search-rag|inspect-rag-index|list-rag-documents> [flags]")
+	fmt.Fprintln(os.Stderr, "usage: akritas <serve|simulate-change|import-local|build-corpus|build-rag-index|search-rag|inspect-rag-index|list-rag-documents|mcp-victoriametrics> [flags]")
 }

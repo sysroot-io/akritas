@@ -18,9 +18,9 @@ func TestRAGIndexRoundTripAndSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 	documents := []corpus.CorpusDocument{
-		{ID: "go", Source: "docs", URL: "https://go.dev", Metadata: map[string]string{"title": "Go"}, Text: "Go - компилируемый язык со статической типизацией. Его разработали в Google."},
-		{ID: "moscow", Source: "wiki", URL: "https://ru.wikipedia.org/wiki/Москва", Metadata: map[string]string{"title": "Москва"}, Text: "Москва - столица России и крупный город."},
-		{ID: "python", Source: "docs", Text: "Python - интерпретируемый язык программирования."},
+		{ID: "go", Source: "docs", URL: "https://go.dev", Metadata: map[string]string{"title": "Go"}, Text: "Go is a statically typed compiled language. It was developed at Google."},
+		{ID: "paris", Source: "wiki", URL: "https://en.wikipedia.org/wiki/Paris", Metadata: map[string]string{"title": "Paris"}, Text: "Paris is the capital of France and a major city."},
+		{ID: "python", Source: "docs", Text: "Python is an interpreted programming language."},
 	}
 	for _, document := range documents {
 		if err := writer.Add(document); err != nil {
@@ -65,7 +65,7 @@ func TestRAGIndexRoundTripAndSearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	results, err := loaded.Search("кто разработал язык Go", 2)
+	results, err := loaded.Search("who developed the Go language", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestRAGIndexRoundTripAndSearch(t *testing.T) {
 }
 
 func TestSplitRAGTextPreservesUnicodeAndOverlap(t *testing.T) {
-	chunks := splitRAGText("один два три четыре пять шесть", 15, 4)
+	chunks := splitRAGText("one café two naïve three résumé", 15, 4)
 	if len(chunks) < 2 {
 		t.Fatalf("expected multiple chunks, got %q", chunks)
 	}

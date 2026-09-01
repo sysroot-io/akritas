@@ -39,7 +39,8 @@ Minimal general chat without tools:
 ```bash
 ./bin/akritas serve \
   -address 127.0.0.1:8090 \
-  -base-url http://127.0.0.1:8080/v1
+  -base-url http://127.0.0.1:8080/v1 \
+  -response-language en
 ```
 
 RAG, read-only MCP, and the test nftables workspace:
@@ -52,6 +53,11 @@ RAG, read-only MCP, and the test nftables workspace:
   -mcp-config data/mcp.json \
   -workspace nftables=testdata/ops-change/nftables \
   -max-tool-calls 8 \
+  -max-iterations 12 \
+  -max-tool-result-bytes 2097152 \
+  -max-retrieved-context-bytes 131072 \
+  -max-context-tokens 40000 \
+  -max-model-tokens 16384 \
   -request-timeout 10m
 ```
 
@@ -147,6 +153,26 @@ The external model is discovered through `/v1/models` when `-upstream-model`
 is empty. The upstream API key is read from `OPENAI_API_KEY`, or from the
 variable selected by `-upstream-api-key-env`.
 
+`-response-language` selects the language for model-generated human-readable
+prose and structured fields such as investigation steps, reasons, summaries,
+risks, and rollback guidance. It accepts a BCP 47 language tag, so it is not
+limited to a built-in language list; examples include `en`, `ru`, `fr`, `de`,
+`ja`, `zh-Hant`, and `pt-BR`. The default is `en`. The host keeps technical
+identifiers, commands, paths, hostnames, metrics, labels, and evidence
+references unchanged. A message written in another language does not override
+the configured value.
+
+This option does not localize the Web UI, fixed Markdown headings, API errors,
+validation messages, or server logs; those remain English. Restart `serve`
+after changing the flag.
+
+Akritas supports both Chat Completions token-limit fields used by compatible
+providers. It starts with `max_tokens` for legacy and local endpoints. If the
+upstream explicitly rejects that field, Akritas retries once with
+`max_completion_tokens` and remembers the accepted field for later requests.
+The negotiation also works in the opposite direction after an upstream model
+change. Unrelated HTTP errors are never retried by this compatibility path.
+
 ## Web UI
 
 ### Chat
@@ -173,22 +199,44 @@ The browser stores the current history in page memory and sends it in full to
 ```
 
 The host builds `activity` from calls that were actually executed, making it
-the source of truth for verification status. Missing capabilities use the
-built-in read-only reporting tool `local.capability.report_missing`: the model
-provides the step, proposed capability, and reason. The tool performs no
-diagnostics and creates no external state; it only converts the model's finding
-into the separate `capability_gaps` field. The UI displays diagnostic calls and
-missing tools separately. If the model did not produce a report, the interface
-says so explicitly and does not claim that no gaps exist.
+the source of truth for verification status. Before diagnostics, the model must
+call the built-in read-only `local.investigation.submit_plan` tool exactly once.
+Its structured payload separates executable `checks` from genuinely unavailable
+`gaps`. Each check contains a step, an exact authorized tool name, arguments,
+and a reason. Each gap contains a step, a proposed capability identifier, and a
+reason. The UI presents activity as a Run log with the Run ID, tool status, call
+ID, and a separate "Unavailable checks" section only when `capability_gaps`
+contains at least one item. An accepted plan with no gaps is a normal status,
+not an error.
 
-Before the main tool loop, the host runs a separate capability-planning request
-with only the reporting tool and `tool_choice=required`. The planner maps the
-steps from the request or retrieved document to the catalog of real execution
-tools and must return one structured report, including an empty `gaps` array
-when nothing is missing. RAG and reporting tools are then excluded from the main
-model-facing catalog: the model can invoke only real read-only diagnostic tools.
-A successful `local.capability.report_missing` call confirms only that a gap
-was recorded, not that the original step was performed.
+Every registry execution also emits two safe structured log lines to stderr:
+`component=akritas_tool event=start` and `component=akritas_tool event=finish`.
+They contain the tool name, call ID, final status and duration in milliseconds,
+but never tool arguments or results. The Web Run log includes the same duration.
+Enable the debug checkbox before a request only when raw arguments and results
+are required.
+
+The tools count in the page header is a button. It opens an authenticated
+catalog containing every tool admitted to the Web runtime, including its name,
+permission and description. The catalog intentionally omits input schemas and
+credentials. It is also available from `GET /api/v1/tools`.
+
+Before the adaptive tool loop, the host runs a separate investigation-planning
+request with only the plan submission tool and `tool_choice=required`. The
+planner receives the request, retrieved knowledge, the remaining check budget,
+and the names, descriptions, and input schemas of authorized read-only execution
+tools. It maps applicable runbook steps to exact tool arguments. Runbooks remain
+human-first guidance: their prose never adds a capability.
+
+The host rejects malformed plans, unknown or denied tool names, non-object
+arguments, duplicate check/gap steps, and plans that exceed the remaining Run
+budget. It then executes every accepted check through the normal registry,
+policy, argument validator, timeout, and result-size controls. All resulting
+`ToolResult` values are appended to model history before the final reasoning
+pass. Failed tool results remain evidence of an attempted check, not of a
+successful diagnosis. RAG and plan-submission tools are excluded from the
+adaptive execution catalog; the model can make follow-up calls only to the same
+authorized read-only diagnostic tools.
 
 The “show payload in the next response” checkbox adds raw arguments and
 `ToolResult`. It affects the next request and does not retroactively reveal a
@@ -240,6 +288,26 @@ proposal appears in a collapsible section and can be downloaded locally as
 bounded raw preview remains as a fallback for older API clients. The complete
 proposal is not written to stderr.
 
+## Run Budgets
+
+Every chat and Alertmanager investigation uses a host-owned budget. The model
+cannot raise these limits. Akritas accounts for all model calls, authorized tool
+calls, aggregate tool-result bytes, retrieved-context bytes, model output tokens,
+submitted model-context bytes, and wall-clock duration.
+
+`-max-context-tokens` is enforced using a conservative upper bound of one token
+per serialized input byte. This remains safe when an upstream uses an unknown
+tokenizer. When the upstream omits completion-token usage, Akritas charges the
+entire reserved output allowance instead of assuming zero usage.
+
+Budget exhaustion stops the Run with an error. Native chat and Alertmanager
+responses include `budget.limits` and `budget.usage`. Final audit metadata keeps
+bounded counters, not prompts or tool payloads. The Web UI displays current
+usage next to tool activity.
+
+For Alertmanager Runs, the validated `investigation` object is stored as a
+separate durable audit record and is restored with the Run after restart.
+
 ## Alertmanager Webhook
 
 `serve` accepts the standard Alertmanager webhook v4:
@@ -253,10 +321,17 @@ protection as the other APIs. The host validates the version, group and alert
 statuses, and RFC3339 timestamps. It limits one group to 128 alerts under the
 shared 1 MiB HTTP limit. The payload is then converted into an untrusted
 operational request and synchronously passes through the same RAG,
-capability-planning, and read-only execution loop as Chat. Labels, annotations,
+investigation-planning, and read-only execution loop as Chat. Labels, annotations,
 and URLs are treated as data, not instructions. A successful response contains
-`run_id`, `answer`, `activity`, and `capability_gaps`; it does not include raw tool
-payloads.
+`run_id`, `answer`, `activity`, `capability_gaps`, `investigation`, and `budget`;
+it does not include raw tool payloads.
+
+`investigation` is a strict host-validated object containing independent
+`finding_status` and `actionability` fields, descriptive `confidence`, a summary,
+an optional hypothesis, affected components, recommended actions, and evidence
+references. Evidence references must match tool-call IDs created by the host.
+Invented references and unknown JSON fields reject the structured result.
+Confidence is never used as an authorization decision.
 
 Manual invocation example:
 
@@ -344,11 +419,12 @@ external model's tokenizer.
 ```text
 GET  /                              embedded Web UI
 GET  /health                        status, model, and tool/workspace counts
+GET  /api/v1/tools                  authorized tool names, permissions, and descriptions
 GET  /api/v1/workspaces             names of authorized workspaces
 GET  /api/v1/runs                   latest durable runs, newest first
 GET  /api/v1/runs/{id}              run lifecycle and bounded audit events
-POST /api/v1/chat                   chat + activity + capability gaps + optional debug
-POST /api/v1/alertmanager/webhook   Alertmanager v4 + RAG/read-only diagnostics
+POST /api/v1/chat                   chat + activity + capability gaps + budget + optional debug
+POST /api/v1/alertmanager/webhook   Alertmanager v4 + structured investigation + budget
 POST /api/v1/change/simulations     read-only proposed diff
 POST /api/v1/change/simulations/{id}/apply  explicit one-time apply
 GET  /v1/models                     OpenAI model catalog
@@ -356,8 +432,11 @@ POST /v1/chat/completions           OpenAI-compatible chat gateway
 ```
 
 JSON requests are limited to 1 MiB; history is limited to 64 messages and
-256 KiB. Response limits are configured with `-max-tokens` and
-`-max-tokens-limit`.
+256 KiB. Per-response limits are configured with `-max-tokens` and
+`-max-tokens-limit`. Aggregate Run limits use `-max-iterations`,
+`-max-tool-calls`, `-max-tool-result-bytes`,
+`-max-retrieved-context-bytes`, `-max-context-tokens`, and
+`-max-model-tokens`.
 
 ## Authentication and Production Deployment
 

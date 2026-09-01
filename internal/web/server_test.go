@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -12,8 +13,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 
 	"akritas/internal/audit"
+	"akritas/internal/investigation"
 	"akritas/internal/rag"
 )
 
@@ -56,6 +59,41 @@ func TestRunAuditEndpointsRequireAuthenticationAndReturnPersistedRuns(t *testing
 	}
 }
 
+func TestToolCatalogRequiresAuthenticationAndListsOnlyAuthorizedTools(t *testing.T) {
+	server := newOpsTestServer(t, "http://127.0.0.1:1/v1", "secret", nil)
+	for _, name := range []string{"test.allowed", "test.denied"} {
+		if err := server.registry.Register(ToolDefinition{
+			Name: name, Description: "Catalog entry for " + name,
+			InputSchema:       json.RawMessage(`{"type":"object","additionalProperties":false}`),
+			Permission:        ToolPermissionRead,
+			ValidateArguments: func(json.RawMessage) error { return nil },
+			Handler: func(context.Context, json.RawMessage) (json.RawMessage, error) {
+				return json.RawMessage(`{"ok":true}`), nil
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	server.policy.Allowed["test.allowed"] = true
+
+	unauthorized := httptest.NewRecorder()
+	server.handler().ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/tools", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status=%d", unauthorized.Code)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/tools", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	server.handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK ||
+		!strings.Contains(response.Body.String(), `"name":"test.allowed"`) ||
+		!strings.Contains(response.Body.String(), `"permission":"read"`) ||
+		strings.Contains(response.Body.String(), "test.denied") {
+		t.Fatalf("catalog status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestOpsWebIncludesFullProposalDiagnostics(t *testing.T) {
 	page, err := opsWebFiles.ReadFile("ops_web/index.html")
 	if err != nil {
@@ -63,12 +101,105 @@ func TestOpsWebIncludesFullProposalDiagnostics(t *testing.T) {
 	}
 	content := string(page)
 	for _, expected := range []string{
-		"Показать полный structured proposal",
-		"Скачать proposal.json",
+		"Show the complete structured proposal",
+		"Download proposal.json",
 		"downloadTextFile",
 	} {
 		if !strings.Contains(content, expected) {
 			t.Fatalf("Ops Web UI is missing %q", expected)
+		}
+	}
+}
+
+func TestOpsWebIncludesToolCatalogAndUnambiguousRunLog(t *testing.T) {
+	page, err := opsWebFiles.ReadFile("ops_web/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(page)
+	for _, expected := range []string{
+		`id="tools-dialog"`,
+		"loadToolCatalog",
+		"Run log",
+		"Investigation plan",
+		"Unavailable checks",
+		"item.duration_ms",
+	} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("Ops Web UI is missing %q", expected)
+		}
+	}
+	if strings.Contains(content, "The report contains no confirmed gaps.") {
+		t.Fatal("empty investigation plan is still presented as a missing-tools error")
+	}
+}
+
+func TestOpsWebRollsBackFailedChatMessage(t *testing.T) {
+	page, err := opsWebFiles.ReadFile("ops_web/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(page)
+	for _, expected := range []string{
+		"state.messages.pop();",
+		"input.value = value;",
+	} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("Ops Web UI does not roll back failed chat messages: missing %q", expected)
+		}
+	}
+}
+
+func TestOpsWebRendersMarkdownTablesAndHorizontalRules(t *testing.T) {
+	page, err := opsWebFiles.ReadFile("ops_web/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(page)
+	for _, expected := range []string{
+		"splitMarkdownTableRow",
+		"markdownTableAlignment",
+		"document.createElement('table')",
+		"document.createElement('thead')",
+		"document.createElement('tbody')",
+		"document.createElement('hr')",
+		".content .table-wrap",
+	} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("Ops Web Markdown renderer is missing %q", expected)
+		}
+	}
+}
+
+func TestOpsWebInterfaceContainsNoCyrillicText(t *testing.T) {
+	page, err := opsWebFiles.ReadFile("ops_web/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if index := strings.IndexFunc(string(page), func(value rune) bool {
+		return unicode.Is(unicode.Cyrillic, value)
+	}); index >= 0 {
+		t.Fatalf("Ops Web UI contains Cyrillic text at byte %d", index)
+	}
+}
+
+func TestOpsChatHistoryUsesConfiguredResponseLanguage(t *testing.T) {
+	history, err := buildOpsChatHistory([]openAIChatMessage{{
+		Role: "user", Content: "Inspect CPU.",
+	}}, "pt-BR")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 2 || history[0].Content == nil {
+		t.Fatalf("unexpected chat history: %+v", history)
+	}
+	for _, expected := range []string{
+		`BCP 47 tag "pt-BR"`,
+		"Do not infer or change the response language",
+		"Preserve exact technical identifiers",
+	} {
+		if !strings.Contains(*history[0].Content, expected) {
+			t.Fatalf("Ops system prompt is missing %q", expected)
 		}
 	}
 }
@@ -83,15 +214,30 @@ func TestOpsServerAcceptsAlertmanagerWebhook(t *testing.T) {
 			http.Error(writer, "invalid test request", http.StatusBadRequest)
 			return
 		}
+		if upstreamCalls == 2 {
+			writeJSON(writer, http.StatusOK, map[string]any{
+				"choices": []any{map[string]any{"message": map[string]any{
+					"role": "assistant", "content": nil,
+					"tool_calls": []any{map[string]any{
+						"id": "result_1", "type": "function",
+						"function": map[string]any{
+							"name":      input.Tools[0].Function.Name,
+							"arguments": `{"finding_status":"suspected","actionability":"requires_human","confidence":"low","summary":"High CPU requires diagnostic evidence.","evidence":[],"affected_components":["api-01"],"recommended_actions":["Collect CPU diagnostics."]}`,
+						},
+					},
+					}}, "finish_reason": "tool_calls"}},
+			})
+			return
+		}
 		if len(input.Messages) != 2 || input.Messages[1].Content == nil ||
 			!strings.Contains(*input.Messages[1].Content, "HighCPU") ||
 			!strings.Contains(*input.Messages[1].Content, "api-01") ||
-			!strings.Contains(*input.Messages[1].Content, "недоверенными данными") {
+			!strings.Contains(*input.Messages[1].Content, "untrusted monitoring data") {
 			t.Errorf("Alertmanager payload is missing from prompt: %+v", input.Messages)
 		}
 		writeJSON(writer, http.StatusOK, map[string]any{
 			"choices": []any{map[string]any{"message": map[string]any{
-				"role": "assistant", "content": "Найден runbook high-cpu; проверки не выполнялись.",
+				"role": "assistant", "content": "Found the high-cpu runbook; no checks were executed.",
 			}}},
 		})
 	}))
@@ -119,7 +265,9 @@ func TestOpsServerAcceptsAlertmanagerWebhook(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !output.Accepted || output.Status != "firing" || output.GroupKey == "" ||
-		!strings.Contains(output.Answer, "high-cpu") || output.Activity == nil {
+		!strings.Contains(output.Answer, "high-cpu") || output.Activity == nil ||
+		output.Investigation.FindingStatus != investigation.FindingSuspected ||
+		output.Budget.Usage.Iterations != 2 {
 		t.Fatalf("unexpected Alertmanager response: %+v", output)
 	}
 
@@ -128,7 +276,7 @@ func TestOpsServerAcceptsAlertmanagerWebhook(t *testing.T) {
 	invalidRequest.Header.Set("Authorization", "Bearer secret")
 	invalidResponse := httptest.NewRecorder()
 	server.handler().ServeHTTP(invalidResponse, invalidRequest)
-	if invalidResponse.Code != http.StatusBadRequest || upstreamCalls != 1 {
+	if invalidResponse.Code != http.StatusBadRequest || upstreamCalls != 2 {
 		t.Fatalf("invalid webhook status=%d upstream_calls=%d body=%s", invalidResponse.Code, upstreamCalls, invalidResponse.Body.String())
 	}
 }
@@ -168,7 +316,7 @@ func TestOpsServerChatAndOpenAIEndpoints(t *testing.T) {
 		}
 		writeJSON(writer, http.StatusOK, map[string]any{
 			"choices": []any{map[string]any{"message": map[string]any{
-				"role": "assistant", "content": "Диагностический ответ.",
+				"role": "assistant", "content": "Diagnostic answer.",
 			}}},
 		})
 	}))
@@ -178,7 +326,7 @@ func TestOpsServerChatAndOpenAIEndpoints(t *testing.T) {
 
 	customRequest := httptest.NewRequest(
 		http.MethodPost, "/api/v1/chat",
-		bytes.NewBufferString(`{"messages":[{"role":"user","content":"Что проверить?"}]}`),
+		bytes.NewBufferString(`{"messages":[{"role":"user","content":"What should be checked?"}]}`),
 	)
 	customResponse := httptest.NewRecorder()
 	handler.ServeHTTP(customResponse, customRequest)
@@ -189,23 +337,23 @@ func TestOpsServerChatAndOpenAIEndpoints(t *testing.T) {
 	if err := json.Unmarshal(customResponse.Body.Bytes(), &customOutput); err != nil {
 		t.Fatal(err)
 	}
-	if customOutput.Answer != "Диагностический ответ." || customOutput.Activity == nil {
+	if customOutput.Answer != "Diagnostic answer." || customOutput.Activity == nil {
 		t.Fatalf("unexpected custom response: %+v", customOutput)
 	}
 
 	openAIRequest := httptest.NewRequest(
 		http.MethodPost, "/v1/chat/completions",
-		bytes.NewBufferString(`{"model":"akritas","messages":[{"role":"user","content":"Что проверить?"}],"stream":false}`),
+		bytes.NewBufferString(`{"model":"akritas","messages":[{"role":"user","content":"What should be checked?"}],"stream":false}`),
 	)
 	openAIResponse := httptest.NewRecorder()
 	handler.ServeHTTP(openAIResponse, openAIRequest)
 	if openAIResponse.Code != http.StatusOK ||
-		!strings.Contains(openAIResponse.Body.String(), "Диагностический ответ") {
+		!strings.Contains(openAIResponse.Body.String(), "Diagnostic answer") {
 		t.Fatalf("OpenAI response status=%d body=%s", openAIResponse.Code, openAIResponse.Body.String())
 	}
 	streamRequest := httptest.NewRequest(
 		http.MethodPost, "/v1/chat/completions",
-		bytes.NewBufferString(`{"model":"akritas","messages":[{"role":"user","content":"Что проверить?"}],"stream":true}`),
+		bytes.NewBufferString(`{"model":"akritas","messages":[{"role":"user","content":"What should be checked?"}],"stream":true}`),
 	)
 	streamResponse := httptest.NewRecorder()
 	handler.ServeHTTP(streamResponse, streamRequest)
@@ -232,7 +380,7 @@ func TestOpsServerPrefetchesRAGForEveryUserTurn(t *testing.T) {
 		}
 		writeJSON(writer, http.StatusOK, map[string]any{
 			"choices": []any{map[string]any{"message": map[string]any{
-				"role": "assistant", "content": "Go разработали в Google [go].",
+				"role": "assistant", "content": "Go was developed at Google [go].",
 			}}},
 		})
 	}))
@@ -247,7 +395,7 @@ func TestOpsServerPrefetchesRAGForEveryUserTurn(t *testing.T) {
 
 	request := httptest.NewRequest(
 		http.MethodPost, "/api/v1/chat",
-		bytes.NewBufferString(`{"messages":[{"role":"user","content":"Кто разработал Go?"}],"debug":true}`),
+		bytes.NewBufferString(`{"messages":[{"role":"user","content":"Who developed Go?"}],"debug":true}`),
 	)
 	response := httptest.NewRecorder()
 	server.handler().ServeHTTP(response, request)
@@ -276,7 +424,7 @@ func TestOpsServerReturnsStructuredCapabilityGaps(t *testing.T) {
 			if input.ToolChoice != "required" || len(input.Tools) != 1 {
 				t.Errorf("capability planner was not forced: %+v", input)
 			}
-			alias := openAIToolAlias(localCapabilityGapToolName)
+			alias := openAIToolAlias(localInvestigationPlanToolName)
 			writeJSON(writer, http.StatusOK, map[string]any{
 				"choices": []any{map[string]any{"message": map[string]any{
 					"role": "assistant", "content": nil,
@@ -284,7 +432,7 @@ func TestOpsServerReturnsStructuredCapabilityGaps(t *testing.T) {
 						"id": "call_gap_1", "type": "function",
 						"function": map[string]any{
 							"name":      alias,
-							"arguments": `{"gaps":[{"step":"Проверить CPU","capability":"metrics.query_range","reason":"Инструмент метрик не зарегистрирован"}]}`,
+							"arguments": `{"checks":[],"gaps":[{"step":"Check CPU","capability":"metrics.query_range","reason":"No metrics tool is registered"}]}`,
 						},
 					}},
 				}}},
@@ -296,20 +444,20 @@ func TestOpsServerReturnsStructuredCapabilityGaps(t *testing.T) {
 		}
 		writeJSON(writer, http.StatusOK, map[string]any{
 			"choices": []any{map[string]any{"message": map[string]any{
-				"role": "assistant", "content": "Проверка CPU не выполнена.",
+				"role": "assistant", "content": "The CPU check was not executed.",
 			}}},
 		})
 	}))
 	defer upstream.Close()
 	server := newOpsTestServer(t, upstream.URL+"/v1", "", nil)
-	if err := registerOpsCapabilityGapTool(server.registry); err != nil {
+	if err := registerOpsInvestigationPlanTool(server.registry); err != nil {
 		t.Fatal(err)
 	}
-	server.policy.Allowed[localCapabilityGapToolName] = true
+	server.policy.Allowed[localInvestigationPlanToolName] = true
 
 	request := httptest.NewRequest(
 		http.MethodPost, "/api/v1/chat",
-		bytes.NewBufferString(`{"messages":[{"role":"user","content":"Проверь CPU"}],"debug":true}`),
+		bytes.NewBufferString(`{"messages":[{"role":"user","content":"Check CPU"}],"debug":true}`),
 	)
 	response := httptest.NewRecorder()
 	server.handler().ServeHTTP(response, request)
@@ -323,7 +471,112 @@ func TestOpsServerReturnsStructuredCapabilityGaps(t *testing.T) {
 	if len(output.CapabilityGaps) != 1 ||
 		output.CapabilityGaps[0].Capability != "metrics.query_range" ||
 		len(output.Activity) != 1 || output.Activity[0].Result == nil {
-		t.Fatalf("structured capability report is missing: %+v", output)
+		t.Fatalf("structured investigation gaps are missing: %+v", output)
+	}
+	if upstreamCalls != 2 {
+		t.Fatalf("upstream calls=%d, want 2", upstreamCalls)
+	}
+}
+
+func TestOpsServerExecutesEveryPlannedReadOnlyCheck(t *testing.T) {
+	upstreamCalls := 0
+	toolExecutions := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		upstreamCalls++
+		var input openAIToolRequest
+		if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
+			t.Errorf("decode upstream request: %v", err)
+		}
+		if upstreamCalls == 1 {
+			if input.ToolChoice != "required" || len(input.Tools) != 1 ||
+				input.Messages[0].Content == nil ||
+				!strings.Contains(*input.Messages[0].Content, `BCP 47 tag "pt-BR"`) ||
+				input.Messages[1].Content == nil ||
+				!strings.Contains(*input.Messages[1].Content, `"response_language":"pt-BR"`) ||
+				!strings.Contains(*input.Messages[1].Content, `"input_schema"`) ||
+				!strings.Contains(*input.Messages[1].Content, `"test.metrics.query"`) ||
+				!strings.Contains(string(input.Tools[0].Function.Parameters), "host-configured response language") {
+				t.Errorf("investigation planner did not receive the authorized tool schema: %+v", input)
+			}
+			alias := openAIToolAlias(localInvestigationPlanToolName)
+			writeJSON(writer, http.StatusOK, map[string]any{
+				"choices": []any{map[string]any{"message": map[string]any{
+					"role": "assistant", "content": nil,
+					"tool_calls": []any{map[string]any{
+						"id": "call_plan_1", "type": "function",
+						"function": map[string]any{
+							"name":      alias,
+							"arguments": `{"checks":[{"step":"Check CPU","tool":"test.metrics.query","arguments":{"host":"node-1"},"reason":"Metrics are available"}],"gaps":[]}`,
+						},
+					}},
+				}}},
+			})
+			return
+		}
+		foundResult := false
+		for _, message := range input.Messages {
+			if message.Role == "tool" && message.ToolCallID == "call_akritas_planned_1" &&
+				message.Content != nil && strings.Contains(*message.Content, `"cpu":87`) {
+				foundResult = true
+			}
+		}
+		if !foundResult {
+			t.Errorf("planned tool result was not supplied to the final model request: %+v", input.Messages)
+		}
+		writeJSON(writer, http.StatusOK, map[string]any{
+			"choices": []any{map[string]any{"message": map[string]any{
+				"role": "assistant", "content": "CPU was confirmed by metrics.",
+			}}},
+		})
+	}))
+	defer upstream.Close()
+	server := newOpsTestServer(t, upstream.URL+"/v1", "", nil)
+	server.responseLanguage = "pt-BR"
+	if err := registerOpsInvestigationPlanTool(server.registry); err != nil {
+		t.Fatal(err)
+	}
+	server.policy.Allowed[localInvestigationPlanToolName] = true
+	if err := server.registry.Register(ToolDefinition{
+		Name: "test.metrics.query", Description: "Read CPU metrics for one host.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"host":{"type":"string"}},"required":["host"],"additionalProperties":false}`),
+		Permission:  ToolPermissionRead,
+		ValidateArguments: func(raw json.RawMessage) error {
+			var arguments struct {
+				Host string `json:"host"`
+			}
+			if err := decodeStrictJSONObject(raw, &arguments); err != nil {
+				return err
+			}
+			if arguments.Host == "" {
+				return fmt.Errorf("host is required")
+			}
+			return nil
+		},
+		Handler: func(context.Context, json.RawMessage) (json.RawMessage, error) {
+			toolExecutions++
+			return json.RawMessage(`{"cpu":87}`), nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server.policy.Allowed["test.metrics.query"] = true
+
+	request := httptest.NewRequest(
+		http.MethodPost, "/api/v1/chat",
+		bytes.NewBufferString(`{"messages":[{"role":"user","content":"Check CPU on node-1"}],"debug":true}`),
+	)
+	response := httptest.NewRecorder()
+	server.handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("chat status=%d body=%s", response.Code, response.Body.String())
+	}
+	var output opsChatAPIResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &output); err != nil {
+		t.Fatal(err)
+	}
+	if toolExecutions != 1 || len(output.Activity) != 2 ||
+		output.Activity[1].Name != "test.metrics.query" || output.Activity[1].Status != "ok" {
+		t.Fatalf("planned check was not executed exactly once: executions=%d output=%+v", toolExecutions, output)
 	}
 	if upstreamCalls != 2 {
 		t.Fatalf("upstream calls=%d, want 2", upstreamCalls)
@@ -393,7 +646,7 @@ func TestOpsServerProtectsAPIAndUsesAllowedWorkspace(t *testing.T) {
 
 	payload := `{
 		"workspace":"nftables",
-		"request":"Разрешить orders-v2.",
+		"request":"Allow orders-v2.",
 		"files":["inventory/backends.yaml","pillar/prod/nftables.sls"]
 	}`
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/change/simulations", bytes.NewBufferString(payload))
@@ -522,7 +775,7 @@ func newOpsTestServer(
 	}
 	server, err := newOpsServer(
 		client, NewToolRegistry(), NamedToolPolicy{Allowed: make(map[string]bool)},
-		"akritas", apiKey, 256, 1024, 0, 4, time.Minute, workspaces,
+		"akritas", apiKey, "en", 256, 1024, 0, 4, time.Minute, workspaces,
 	)
 	if err != nil {
 		t.Fatal(err)

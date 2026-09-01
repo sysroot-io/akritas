@@ -1,8 +1,11 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log"
+	"strings"
 	"testing"
 	"time"
 )
@@ -29,6 +32,10 @@ func TestToolRegistryDeniesCallsWithoutExplicitPolicy(t *testing.T) {
 }
 
 func TestToolRegistryEnforcesExecutionTimeout(t *testing.T) {
+	var logs bytes.Buffer
+	previousWriter := log.Writer()
+	log.SetOutput(&logs)
+	defer log.SetOutput(previousWriter)
 	registry := NewToolRegistry()
 	if err := registry.Register(ToolDefinition{
 		Name: "security.slow", Description: "security timeout test", Permission: ToolPermissionRead,
@@ -47,5 +54,13 @@ func TestToolRegistryEnforcesExecutionTimeout(t *testing.T) {
 	}, NamedToolPolicy{Allowed: map[string]bool{"security.slow": true}})
 	if result.Error == nil || result.Error.Code != "timeout" {
 		t.Fatalf("slow tool was not terminated: %+v", result)
+	}
+	if result.DurationMS < 5 {
+		t.Fatalf("tool duration=%dms, want at least 5ms", result.DurationMS)
+	}
+	logged := logs.String()
+	if !strings.Contains(logged, `event=start tool="security.slow" call_id="call_1"`) ||
+		!strings.Contains(logged, `event=finish tool="security.slow" call_id="call_1" status="timeout"`) {
+		t.Fatalf("tool lifecycle logs are incomplete: %s", logged)
 	}
 }

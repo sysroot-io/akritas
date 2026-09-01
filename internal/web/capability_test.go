@@ -6,30 +6,29 @@ import (
 	"testing"
 )
 
-func TestOpsCapabilityGapToolValidatesAndBuildsReport(t *testing.T) {
+func TestOpsInvestigationPlanToolValidatesAndBuildsGaps(t *testing.T) {
 	registry := NewToolRegistry()
-	if err := registerOpsCapabilityGapTool(registry); err != nil {
+	if err := registerOpsInvestigationPlanTool(registry); err != nil {
 		t.Fatal(err)
 	}
-	policy := NamedToolPolicy{Allowed: map[string]bool{localCapabilityGapToolName: true}}
+	policy := NamedToolPolicy{Allowed: map[string]bool{localInvestigationPlanToolName: true}}
 	call := ToolCall{
-		ID: "call-gap", Name: localCapabilityGapToolName,
-		Arguments: json.RawMessage(`{"gaps":[{"step":"Проверить CPU","capability":"metrics.query_range","reason":"Нет инструмента метрик"}]}`),
+		ID: "call-plan", Name: localInvestigationPlanToolName,
+		Arguments: json.RawMessage(`{"checks":[{"step":"Check CPU","tool":"mcp.metrics.query_range","arguments":{"query":"cpu"},"reason":"Metrics tool is available"}],"gaps":[{"step":"Check logs","capability":"logs.search","reason":"No logs tool is available"}]}`),
 	}
 	toolResult := registry.Execute(context.Background(), call, policy)
 	if toolResult.Error != nil {
-		t.Fatalf("report tool failed: %+v", toolResult.Error)
+		t.Fatalf("plan tool failed: %+v", toolResult.Error)
 	}
 	loopResult := openAIToolLoopResult{Calls: []ToolCall{call}, Results: []ToolResult{toolResult}}
 	gaps := buildOpsCapabilityGaps(loopResult)
-	if len(gaps) != 1 || gaps[0].Capability != "metrics.query_range" ||
-		gaps[0].Step != "Проверить CPU" {
+	if len(gaps) != 1 || gaps[0].Capability != "logs.search" || gaps[0].Step != "Check logs" {
 		t.Fatalf("unexpected capability gaps: %+v", gaps)
 	}
 
-	call.Arguments = json.RawMessage(`{"gaps":[{"step":"CPU","capability":"metrics.query","reason":"нет"},{"step":"CPU","capability":"metrics.query","reason":"нет"}]}`)
+	call.Arguments = json.RawMessage(`{"checks":[{"step":"CPU","tool":"metrics.query","arguments":{},"reason":"available"}],"gaps":[{"step":"CPU","capability":"metrics.query","reason":"unavailable"}]}`)
 	invalid := registry.Execute(context.Background(), call, policy)
 	if invalid.Error == nil || invalid.Error.Code != "invalid_arguments" {
-		t.Fatalf("duplicate capability gap was accepted: %+v", invalid)
+		t.Fatalf("check duplicated as a gap was accepted: %+v", invalid)
 	}
 }

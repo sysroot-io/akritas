@@ -10,7 +10,7 @@ func TestInspectRAGIndex(t *testing.T) {
 	index := testRAGIndex(t)
 	index.Chunks = append(index.Chunks, RAGChunk{
 		DocumentID: "go", Title: "Go", Chunk: 1, Source: "test",
-		Text: "Вторая часть документа.", Tokens: 4,
+		Text: "The second part of the document.", Tokens: 4,
 	})
 	path := filepath.Join(t.TempDir(), "index.tgr")
 	if err := SaveRAGIndex(path, index); err != nil {

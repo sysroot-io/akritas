@@ -1,12 +1,14 @@
 package web
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
 	"akritas/internal/audit"
 	"akritas/internal/clients/openai"
 	"akritas/internal/mcp"
+	"akritas/internal/runbudget"
 )
 
 type Server = opsServer
@@ -16,7 +18,7 @@ func NewServer(
 	client *openai.Client,
 	registry *mcp.ToolRegistry,
 	policy mcp.NamedToolPolicy,
-	modelID, apiKey string,
+	modelID, apiKey, responseLanguage string,
 	defaultMaxTokens, maxTokensLimit int,
 	defaultTemperature float64,
 	maxToolCalls int,
@@ -24,7 +26,7 @@ func NewServer(
 	workspaces map[string]Workspace,
 ) (*Server, error) {
 	return newOpsServer(
-		client, registry, policy, modelID, apiKey, defaultMaxTokens,
+		client, registry, policy, modelID, apiKey, responseLanguage, defaultMaxTokens,
 		maxTokensLimit, defaultTemperature, maxToolCalls, requestTimeout, workspaces,
 	)
 }
@@ -37,6 +39,17 @@ func (server *opsServer) SetValidatorProfiles(profiles []string) {
 
 func (server *opsServer) SetAuditStore(store *audit.Store) {
 	server.auditStore = store
+}
+
+func (server *opsServer) SetRunBudget(limits runbudget.Limits) error {
+	if err := limits.Validate(); err != nil {
+		return err
+	}
+	if limits.MaxToolCalls != server.maxToolCalls {
+		return fmt.Errorf("run budget max tool calls must equal server max tool calls")
+	}
+	server.runBudgetLimits = limits
+	return nil
 }
 
 func LoadWorkspaceConfig(path string) (map[string]Workspace, []string, error) {
@@ -60,8 +73,8 @@ func RegisterReadOnlyTools(
 	return registerReadOnlyTools(destination, policy, source, sourcePolicy)
 }
 
-func RegisterCapabilityGapTool(registry *mcp.ToolRegistry) error {
-	return registerOpsCapabilityGapTool(registry)
+func RegisterInvestigationPlanTool(registry *mcp.ToolRegistry) error {
+	return registerOpsInvestigationPlanTool(registry)
 }
 
-const CapabilityGapToolName = localCapabilityGapToolName
+const InvestigationPlanToolName = localInvestigationPlanToolName

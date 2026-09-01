@@ -101,7 +101,7 @@ func requestChangeDiscoveryPlan(
 		Description: "Returns concise repository search queries for locating source-of-truth files, inventories, documentation and generated-file ownership.",
 		Parameters:  json.RawMessage(changeDiscoverySchema),
 	}}
-	system := `Ты планировщик поиска по инфраструктурному репозиторию. По запросу пользователя сформируй 2–8 коротких lexical queries: имена сущностей, ключи конфигурации, вероятные технологии и слова для поиска source of truth. Не придумывай пути. Обязательно вызови единственную функцию ровно один раз.`
+	system := `You plan searches in an infrastructure repository. From the user request, produce 2 to 8 short lexical queries containing entity names, configuration keys, likely technologies, and terms that help locate the source of truth. Do not invent paths. You must call the single function exactly once.`
 	user := strings.TrimSpace(request)
 	planningTokens := maxTokens
 	if planningTokens > 512 {

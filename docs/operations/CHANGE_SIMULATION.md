@@ -291,6 +291,7 @@ From the `Akritas/` directory:
   -file pillar/prod/nftables.sls \
   -file salt/nftables/README.md \
   -file salt/nftables/templates/backends.nft.jinja \
+  -response-language en \
   -max-tokens 1600 \
   -temperature 0
 ```
@@ -303,6 +304,13 @@ An empty `-model` selects the first model returned by `/v1/models`. The API
 key is read from `OPENAI_API_KEY`; use `-api-key-env` to select another
 variable. `-print-prompt` prints SYSTEM, USER, the tool schema, and
 `tool_choice=required` without calling the model.
+
+`-response-language` accepts any valid BCP 47 language tag and controls the
+model-generated analysis, checks, risks, rollback guidance, and clarification
+questions. It defaults to `en`. Paths, code, commands, and other technical
+identifiers remain unchanged. Under `serve`, the same setting also applies to
+change simulations opened from the Web UI, while the interface itself remains
+English.
 
 The result contains analysis, a fenced host-generated diff, host validation,
 proposed but unexecuted model checks, host validators that actually ran, risks,
@@ -345,4 +353,3 @@ crashes between renames. Approval is in-memory only, one-time, and disappears
 after restart. Git commits and merge requests are not created automatically:
 after application, the user inspects the working tree and commits through the
 normal process.
-

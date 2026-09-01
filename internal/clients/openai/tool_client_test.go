@@ -85,7 +85,7 @@ func TestOpenAIToolLoopDiscoversModelAndExecutesAuthorizedTool(t *testing.T) {
 	result, err := runOpenAIToolLoop(
 		context.Background(), client,
 		[]openAIToolMessage{{Role: "system", Content: &system}, {Role: "user", Content: &user}},
-		registry, policy, 2, 64, 0,
+		registry, policy, 2, 64, 0, nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -98,6 +98,89 @@ func TestOpenAIToolLoopDiscoversModelAndExecutesAuthorizedTool(t *testing.T) {
 	}
 	if requests != 2 {
 		t.Fatalf("chat requests=%d, want 2", requests)
+	}
+}
+
+func TestOpenAIClientNegotiatesAndCachesTokenLimitParameter(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests++
+		var input openAIToolRequest
+		if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
+			t.Errorf("decode request: %v", err)
+			http.Error(writer, "invalid request", http.StatusBadRequest)
+			return
+		}
+		switch requests {
+		case 1:
+			if input.MaxTokens == nil || *input.MaxTokens != 64 || input.MaxCompletionTokens != nil {
+				t.Errorf("first request did not use max_tokens: %+v", input)
+			}
+			writeTestJSON(writer, http.StatusBadRequest, map[string]any{"error": map[string]any{
+				"message": "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.",
+				"type":    "invalid_request_error", "param": "max_tokens", "code": "unsupported_parameter",
+			}})
+			return
+		case 2, 3:
+			if input.MaxTokens != nil || input.MaxCompletionTokens == nil || *input.MaxCompletionTokens != 64 {
+				t.Errorf("request %d did not use max_completion_tokens: %+v", requests, input)
+			}
+		default:
+			t.Errorf("unexpected request %d", requests)
+		}
+		writeTestJSON(writer, http.StatusOK, map[string]any{
+			"choices": []any{map[string]any{"message": map[string]any{
+				"role": "assistant", "content": "compatible",
+			}}},
+		})
+	}))
+	defer server.Close()
+
+	client, err := newOpenAIToolClient(server.URL+"/v1", "modern-model", "", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := "Test compatibility."
+	for call := 0; call < 2; call++ {
+		message, err := client.complete(
+			context.Background(), []openAIToolMessage{{Role: "user", Content: &user}}, nil, 64, 0,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if message.Content == nil || *message.Content != "compatible" {
+			t.Fatalf("unexpected message: %+v", message)
+		}
+	}
+	if requests != 3 {
+		t.Fatalf("requests=%d, want 3", requests)
+	}
+}
+
+func TestOpenAIClientDoesNotRetryUnrelatedBadRequest(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests++
+		writeTestJSON(writer, http.StatusBadRequest, map[string]any{"error": map[string]any{
+			"message": "Invalid tool schema.", "type": "invalid_request_error",
+			"param": "tools", "code": "invalid_value",
+		}})
+	}))
+	defer server.Close()
+
+	client, err := newOpenAIToolClient(server.URL+"/v1", "test-model", "", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := "Test error handling."
+	_, err = client.complete(
+		context.Background(), []openAIToolMessage{{Role: "user", Content: &user}}, nil, 64, 0,
+	)
+	if err == nil || !strings.Contains(err.Error(), "Invalid tool schema") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("requests=%d, want 1", requests)
 	}
 }
 

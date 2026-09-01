@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"regexp"
 	"sort"
 	"strings"
@@ -47,10 +48,11 @@ type ToolError struct {
 }
 
 type ToolResult struct {
-	ID     string          `json:"id"`
-	Name   string          `json:"name"`
-	Output json.RawMessage `json:"output,omitempty"`
-	Error  *ToolError      `json:"error,omitempty"`
+	ID         string          `json:"id"`
+	Name       string          `json:"name"`
+	Output     json.RawMessage `json:"output,omitempty"`
+	Error      *ToolError      `json:"error,omitempty"`
+	DurationMS int64           `json:"-"`
 }
 
 type ToolArgumentValidator func(json.RawMessage) error
@@ -136,8 +138,28 @@ func (registry *ToolRegistry) Register(definition ToolDefinition) error {
 	return nil
 }
 
-func (registry *ToolRegistry) Execute(ctx context.Context, call ToolCall, policy ToolAuthorizationPolicy) ToolResult {
-	result := ToolResult{ID: call.ID, Name: call.Name}
+func (registry *ToolRegistry) Execute(
+	ctx context.Context,
+	call ToolCall,
+	policy ToolAuthorizationPolicy,
+) (result ToolResult) {
+	started := time.Now()
+	result = ToolResult{ID: call.ID, Name: call.Name}
+	log.Printf(
+		"level=info component=akritas_tool event=start tool=%q call_id=%q",
+		call.Name, call.ID,
+	)
+	defer func() {
+		result.DurationMS = time.Since(started).Milliseconds()
+		status := "ok"
+		if result.Error != nil {
+			status = result.Error.Code
+		}
+		log.Printf(
+			"level=info component=akritas_tool event=finish tool=%q call_id=%q status=%q duration_ms=%d",
+			call.Name, call.ID, status, result.DurationMS,
+		)
+	}()
 	if err := validateToolCall(call); err != nil {
 		result.Error = &ToolError{Code: "invalid_call", Message: err.Error()}
 		return result

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"akritas/internal/modeltext"
 )
 
 const (
@@ -84,7 +86,22 @@ func runChangeSimulation(
 	maxTokens int,
 	temperature float64,
 ) (changeSimulationResult, error) {
-	return runChangeSimulationValidated(ctx, client, snapshot, maxTokens, temperature, "", nil)
+	return runChangeSimulationWithLanguage(
+		ctx, client, snapshot, maxTokens, temperature, modeltext.DefaultLanguage,
+	)
+}
+
+func runChangeSimulationWithLanguage(
+	ctx context.Context,
+	client *openAIToolClient,
+	snapshot changeSimulationSnapshot,
+	maxTokens int,
+	temperature float64,
+	responseLanguage string,
+) (changeSimulationResult, error) {
+	return runChangeSimulationValidatedWithLanguage(
+		ctx, client, snapshot, maxTokens, temperature, "", nil, responseLanguage,
+	)
 }
 
 func runChangeSimulationValidated(
@@ -96,14 +113,34 @@ func runChangeSimulationValidated(
 	root string,
 	validatorProfiles []string,
 ) (changeSimulationResult, error) {
+	return runChangeSimulationValidatedWithLanguage(
+		ctx, client, snapshot, maxTokens, temperature, root, validatorProfiles,
+		modeltext.DefaultLanguage,
+	)
+}
+
+func runChangeSimulationValidatedWithLanguage(
+	ctx context.Context,
+	client *openAIToolClient,
+	snapshot changeSimulationSnapshot,
+	maxTokens int,
+	temperature float64,
+	root string,
+	validatorProfiles []string,
+	responseLanguage string,
+) (changeSimulationResult, error) {
 	if client == nil || maxTokens <= 0 || temperature < 0 {
 		return changeSimulationResult{}, fmt.Errorf("change simulation requires a client and valid generation limits")
+	}
+	responseLanguage, err := modeltext.NormalizeLanguageTag(responseLanguage)
+	if err != nil {
+		return changeSimulationResult{}, err
 	}
 	previousError := ""
 	diagnostics := make([]changeSimulationAttemptDiagnostic, 0, changeSimulationAttempts)
 	for attempt := 1; attempt <= changeSimulationAttempts; attempt++ {
 		proposal, diagnostic, err := requestChangeSimulationProposal(
-			ctx, client, snapshot, previousError, maxTokens, temperature,
+			ctx, client, snapshot, previousError, maxTokens, temperature, responseLanguage,
 		)
 		diagnostic.Attempt = attempt
 		if err != nil {
@@ -150,6 +187,7 @@ func requestChangeSimulationProposal(
 	previousError string,
 	maxTokens int,
 	temperature float64,
+	responseLanguage string,
 ) (changeSimulationProposal, changeSimulationAttemptDiagnostic, error) {
 	diagnostic := changeSimulationAttemptDiagnostic{Stage: "request"}
 	userPrompt, err := buildChangeSimulationPrompt(snapshot)
@@ -157,7 +195,7 @@ func requestChangeSimulationProposal(
 		return changeSimulationProposal{}, diagnostic, err
 	}
 	if previousError != "" {
-		userPrompt += "\n\nHOST_VALIDATION_ERROR предыдущей попытки:\n" + previousError +
+		userPrompt += "\n\nHOST_VALIDATION_ERROR from the previous attempt:\n" + previousError +
 			"\n" + changeSimulationRepairInstruction(previousError)
 	}
 	tool := openAIToolSpec{Type: "function", Function: openAIToolFunction{
@@ -165,7 +203,7 @@ func requestChangeSimulationProposal(
 		Description: "Returns exact, non-applied repository edits. Clarifications are only unanswered user questions and must be empty when edits are present.",
 		Parameters:  json.RawMessage(changeSimulationProposalSchema),
 	}}
-	systemPrompt := changeSimulationSystemPrompt
+	systemPrompt := changeSimulationSystemPrompt + "\n\n" + modeltext.LanguageInstruction(responseLanguage)
 	message, err := client.CompleteWithToolChoice(
 		ctx,
 		[]openAIToolMessage{
@@ -202,7 +240,7 @@ func requestChangeSimulationProposal(
 	); err != nil {
 		diagnostic.Stage = "decode_arguments"
 		if strings.Contains(err.Error(), "unexpected EOF") || message.FinishReason == "length" {
-			diagnostic.Hint = "Ответ модели, вероятно, обрезан лимитом токенов: увеличьте max_tokens или уменьшите число/размер файлов snapshot."
+			diagnostic.Hint = "The model response was probably truncated by the token limit: increase max_tokens or reduce the number or size of snapshot files."
 		}
 		return changeSimulationProposal{}, diagnostic, fmt.Errorf("decode structured change proposal: %w", err)
 	}
@@ -218,50 +256,47 @@ func requestChangeSimulationProposal(
 
 func changeSimulationRepairInstruction(previousError string) string {
 	if strings.Contains(previousError, "proposal without edits requires clarifications") {
-		return "Пересмотри request как требование к изменению наблюдаемого поведения. " +
-			"Не считай наличие похожего config field или внутренней функции доказательством готовности: " +
-			"проверь route/handler, вызов логики и response/output. Если изменение можно определить " +
-			"по snapshot, верни exact edits. Иначе верни edits=[] и хотя бы один конкретный вопрос " +
-			"в clarifications о недостающем API contract, entry point или source of truth. " +
-			"Верни полное исправленное structured proposal."
+		return "Reconsider the request as a requirement to change observable behavior. " +
+			"Do not treat the presence of a similar configuration field or internal function as proof that the behavior is already implemented. " +
+			"Inspect the route or handler, the logic invocation, and the response or output. If the change can be determined from the snapshot, " +
+			"return exact edits. Otherwise return edits=[] and at least one specific question in clarifications about the missing API contract, " +
+			"entry point, or source of truth. Return the complete corrected structured proposal."
 	}
 	if strings.Contains(previousError, "proposal with edits must not contain clarifications") {
-		return "Proposal уже содержит edits, поэтому clarifications должен быть пустым массивом. " +
-			"Тексты, которые являются пояснениями, выводами или предположениями, перенеси в analysis. " +
-			"Если какой-либо пункт действительно является блокирующим вопросом к пользователю, удали edits " +
-			"и сформулируй этот пункт как конкретный вопрос. При запросе на новую ручку не заменяй " +
-			"существующий endpoint: сохрани обратную совместимость, добавь новый route и явно построй " +
-			"требуемый response type. Верни полное исправленное structured proposal."
+		return "The proposal already contains edits, so clarifications must be an empty array. " +
+			"Move explanatory text, conclusions, and assumptions to analysis. If an item is genuinely a blocking question for the user, " +
+			"remove the edits and formulate the item as a specific question. When a new handler is requested, do not replace an existing endpoint: " +
+			"preserve backward compatibility, add a new route, and explicitly construct the required response type. " +
+			"Return the complete corrected structured proposal."
 	}
 	if strings.Contains(previousError, "old text must match") {
-		return "Используй только точное текущее содержимое repository file. Если matches=0, заново скопируй old из snapshot. " +
-			"Если matches больше 1, расширь old уникальным окружающим контекстом нужного route, handler, function или config section; " +
-			"не меняй все совпадения и не выбирай одно наугад. Одновременно перепроверь семантику вызываемой функции: " +
-			"не считай 0, пустую строку или nil значением «без ограничения», если это прямо не следует из реализации. " +
-			"Верни полное исправленное structured proposal."
+		return "Use only the exact current content of the repository file. When matches=0, copy old again from the snapshot. " +
+			"When matches is greater than 1, extend old with unique surrounding context from the required route, handler, function, or configuration section. " +
+			"Do not change every match or choose one at random. Also verify the semantics of the called function: do not treat 0, an empty string, " +
+			"or nil as unlimited unless the implementation explicitly establishes that behavior. Return the complete corrected structured proposal."
 	}
 	if strings.Contains(previousError, "no effective changes after ignoring") {
-		return "Все предложенные edits оказались no-op: old и new были одинаковыми. Верни реальное изменение с отличающимся new. " +
-			"Повторно проверь требуемый observable response. Если request требует не JSON/plain text, не вызывай JSON helper: " +
-			"собери нужные элементы, задай подходящий Content-Type и явно сериализуй тело. Не изменяй другие endpoints. " +
-			"Если изменение невозможно определить по snapshot, вместо no-op верни edits=[] и конкретный вопрос в clarifications. " +
-			"Верни полное исправленное structured proposal."
+		return "All proposed edits were no-ops because old and new were identical. Return a real change with a different new value. " +
+			"Recheck the required observable response. If the request requires non-JSON or plain-text output, do not call a JSON helper: " +
+			"construct the required elements, set the appropriate Content-Type, and serialize the body explicitly. Do not modify other endpoints. " +
+			"If the change cannot be determined from the snapshot, return edits=[] and a specific question in clarifications instead of a no-op. " +
+			"Return the complete corrected structured proposal."
 	}
-	return "Верни полное исправленное structured proposal."
+	return "Return the complete corrected structured proposal."
 }
 
 func changeSimulationProposalHint(validationError string) string {
 	if strings.Contains(validationError, "proposal without edits requires clarifications") {
-		return "Модель не предложила изменений и не задала вопросов. Akritas повторно попросит проследить внешнее поведение и вернуть exact edits либо конкретные clarifications."
+		return "The model proposed no edits and asked no questions. Akritas will ask it to trace the external behavior and return exact edits or specific clarifications."
 	}
 	if strings.Contains(validationError, "proposal with edits must not contain clarifications") {
-		return "Модель предложила edits, но записала пояснения в clarifications. Akritas попросит очистить clarifications, перенести пояснения в analysis и сохранить существующий endpoint при добавлении нового."
+		return "The model proposed edits but placed explanations in clarifications. Akritas will ask it to clear clarifications, move explanations to analysis, and preserve the existing endpoint when adding a new one."
 	}
 	if strings.Contains(validationError, "old text must match") {
-		return "Exact old отсутствует или неоднозначен. Akritas попросит скопировать актуальный old либо расширить его уникальным контекстом нужного route/handler и не угадывать семантику special values."
+		return "The exact old text is missing or ambiguous. Akritas will ask the model to copy the current old text or extend it with unique context from the required route or handler, without guessing the semantics of special values."
 	}
 	if strings.Contains(validationError, "no effective changes after ignoring") {
-		return "Все edits были no-op с одинаковыми old/new. Akritas попросит вернуть реальное изменение wire format либо конкретный clarification вместо фиктивного diff."
+		return "All edits were no-ops with identical old and new values. Akritas will ask for a real wire-format change or a specific clarification instead of a fictitious diff."
 	}
 	return ""
 }
@@ -686,11 +721,11 @@ func writeChangeDiffLine(output *strings.Builder, prefix rune, line string, noNe
 
 func formatChangeSimulationResult(result changeSimulationResult) string {
 	var output strings.Builder
-	output.WriteString("## Анализ\n\n")
+	output.WriteString("## Analysis\n\n")
 	output.WriteString(result.Analysis)
 	output.WriteString("\n")
 	if len(result.Clarifications) > 0 {
-		output.WriteString("\n## Нужно уточнить\n\n")
+		output.WriteString("\n## Clarifications\n\n")
 		writeChangeSimulationList(&output, result.Clarifications)
 	} else {
 		output.WriteString("\n## Host-generated diff\n\n```diff\n")
@@ -704,20 +739,20 @@ func formatChangeSimulationResult(result changeSimulationResult) string {
 		writeChangeSimulationList(&output, result.Warnings)
 	}
 	if len(result.Checks) > 0 {
-		output.WriteString("\n## Предлагаемые проверки - не выполнены\n\n")
+		output.WriteString("\n## Proposed checks - not executed\n\n")
 		writeChangeSimulationList(&output, result.Checks)
 	}
 	if len(result.Risks) > 0 {
-		output.WriteString("\n## Риски\n\n")
+		output.WriteString("\n## Risks\n\n")
 		writeChangeSimulationList(&output, result.Risks)
 	}
 	if result.Rollback != "" {
-		output.WriteString("\n## Откат\n\n")
+		output.WriteString("\n## Rollback\n\n")
 		output.WriteString(result.Rollback)
 		output.WriteString("\n")
 	}
 	if len(result.Validators) > 0 {
-		output.WriteString("\n## Выполненные host validators\n\n")
+		output.WriteString("\n## Executed host validators\n\n")
 		for _, validator := range result.Validators {
 			fmt.Fprintf(&output, "- `%s`: **%s** (%d ms)", validator.Name, validator.Status, validator.DurationMS)
 			if validator.Output != "" {

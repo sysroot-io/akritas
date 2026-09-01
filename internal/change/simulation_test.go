@@ -298,7 +298,7 @@ func TestBuildHostUnifiedDiffUsesValidHunkCounts(t *testing.T) {
 
 func TestRunChangeSimulationUsesForcedStructuredProposalAndRepairs(t *testing.T) {
 	snapshot := changeSimulationSnapshot{
-		RequestPath: "REQUEST.md", Request: "Разрешить orders-v2.",
+		RequestPath: "REQUEST.md", Request: "Allow orders-v2.",
 		Files: []changeSimulationFile{{
 			Path: "pillar/nftables.sls", Content: "allowlist: []\n",
 		}},
@@ -318,7 +318,9 @@ func TestRunChangeSimulationUsesForcedStructuredProposalAndRepairs(t *testing.T)
 			input.ToolChoice != "required" || input.Tools[0].Function.Name != changeSimulationProposalToolName {
 			t.Errorf("unexpected OpenAI input: %+v", input)
 		}
-		if input.Messages[0].Role != "system" || input.Messages[1].Content == nil ||
+		if input.Messages[0].Role != "system" || input.Messages[0].Content == nil ||
+			!strings.Contains(*input.Messages[0].Content, `BCP 47 tag "fr"`) ||
+			input.Messages[1].Content == nil ||
 			!strings.Contains(*input.Messages[1].Content, "pillar/nftables.sls") {
 			t.Errorf("snapshot was not passed in messages: %+v", input.Messages)
 		}
@@ -360,7 +362,9 @@ func TestRunChangeSimulationUsesForcedStructuredProposalAndRepairs(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := runChangeSimulation(context.Background(), client, snapshot, 512, 0)
+	result, err := runChangeSimulationWithLanguage(
+		context.Background(), client, snapshot, 512, 0, "fr",
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,7 +381,7 @@ func TestRunChangeSimulationUsesForcedStructuredProposalAndRepairs(t *testing.T)
 
 func TestRunChangeSimulationRepairsUnsupportedNoChangeConclusion(t *testing.T) {
 	snapshot := changeSimulationSnapshot{
-		RequestPath: "<inline>", Request: "Добавить endpoint со списком JA4 fingerprints.",
+		RequestPath: "<inline>", Request: "Add an endpoint that lists JA4 fingerprints.",
 		Files: []changeSimulationFile{{Path: "main.go", Content: "package main\n\nfunc existing() {}\n"}},
 	}
 	requests := 0
@@ -390,8 +394,8 @@ func TestRunChangeSimulationRepairsUnsupportedNoChangeConclusion(t *testing.T) {
 		proposal := changeSimulationProposal{Analysis: "JA4 config already exists."}
 		if requests == 2 {
 			if input.Messages[1].Content == nil ||
-				!strings.Contains(*input.Messages[1].Content, "route/handler") ||
-				!strings.Contains(*input.Messages[1].Content, "конкретный вопрос") {
+				!strings.Contains(*input.Messages[1].Content, "route or handler") ||
+				!strings.Contains(*input.Messages[1].Content, "specific question") {
 				t.Fatalf("repair prompt is not actionable: %+v", input.Messages[1])
 			}
 			proposal = changeSimulationProposal{
@@ -436,12 +440,12 @@ func TestRunChangeSimulationRepairsUnsupportedNoChangeConclusion(t *testing.T) {
 func TestChangeSimulationRepairSeparatesEditsFromClarifications(t *testing.T) {
 	errorText := "proposal with edits must not contain clarifications"
 	repair := changeSimulationRepairInstruction(errorText)
-	for _, expected := range []string{"clarifications должен быть пустым", "перенеси в analysis", "не заменяй", "response type"} {
+	for _, expected := range []string{"clarifications must be an empty array", "Move explanatory text", "do not replace", "response type"} {
 		if !strings.Contains(repair, expected) {
 			t.Fatalf("repair instruction does not contain %q: %s", expected, repair)
 		}
 	}
-	if hint := changeSimulationProposalHint(errorText); hint == "" || !strings.Contains(hint, "пояснения") {
+	if hint := changeSimulationProposalHint(errorText); hint == "" || !strings.Contains(hint, "explanations") {
 		t.Fatalf("missing actionable hint: %q", hint)
 	}
 }
@@ -449,12 +453,12 @@ func TestChangeSimulationRepairSeparatesEditsFromClarifications(t *testing.T) {
 func TestChangeSimulationRepairExpandsAmbiguousExactOld(t *testing.T) {
 	errorText := `edits[0] old text must match "server.go" exactly once; matches=2; matching_start_lines=[73 87]`
 	repair := changeSimulationRepairInstruction(errorText)
-	for _, expected := range []string{"уникальным окружающим контекстом", "route", "не меняй все совпадения", "не считай 0"} {
+	for _, expected := range []string{"unique surrounding context", "route", "Do not change every match", "do not treat 0"} {
 		if !strings.Contains(repair, expected) {
 			t.Fatalf("repair instruction does not contain %q: %s", expected, repair)
 		}
 	}
-	if hint := changeSimulationProposalHint(errorText); hint == "" || !strings.Contains(hint, "неоднозначен") {
+	if hint := changeSimulationProposalHint(errorText); hint == "" || !strings.Contains(hint, "ambiguous") {
 		t.Fatalf("missing ambiguous-old hint: %q", hint)
 	}
 }
@@ -462,12 +466,12 @@ func TestChangeSimulationRepairExpandsAmbiguousExactOld(t *testing.T) {
 func TestChangeSimulationRepairReplacesNoOpWithRealWireFormatChange(t *testing.T) {
 	errorText := `proposal contains no effective changes after ignoring 1 no-op edits: ignored no-op edits[0] for "server.go" because old and new are identical`
 	repair := changeSimulationRepairInstruction(errorText)
-	for _, expected := range []string{"реальное изменение", "не вызывай JSON helper", "Content-Type", "Не изменяй другие endpoints"} {
+	for _, expected := range []string{"real change", "do not call a JSON helper", "Content-Type", "Do not modify other endpoints"} {
 		if !strings.Contains(repair, expected) {
 			t.Fatalf("repair instruction does not contain %q: %s", expected, repair)
 		}
 	}
-	if hint := changeSimulationProposalHint(errorText); hint == "" || !strings.Contains(hint, "одинаковыми old/new") {
+	if hint := changeSimulationProposalHint(errorText); hint == "" || !strings.Contains(hint, "identical old and new") {
 		t.Fatalf("missing all-no-op hint: %q", hint)
 	}
 }

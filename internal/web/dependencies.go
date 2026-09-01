@@ -10,6 +10,7 @@ import (
 	"akritas/internal/clients/openai"
 	"akritas/internal/mcp"
 	"akritas/internal/rag"
+	"akritas/internal/runbudget"
 )
 
 type openAIToolCall = openai.ToolCall
@@ -32,8 +33,11 @@ func runOpenAIToolLoop(
 	policy ToolAuthorizationPolicy,
 	maxCalls, maxTokens int,
 	temperature float64,
+	tracker *runbudget.Tracker,
 ) (openAIToolLoopResult, error) {
-	return openai.RunToolLoop(ctx, client, history, registry, policy, maxCalls, maxTokens, temperature)
+	return openai.RunToolLoopBudgeted(
+		ctx, client, history, registry, policy, maxCalls, maxTokens, temperature, tracker,
+	)
 }
 
 func buildOpenAITools(definitions []ToolDefinition) ([]openAIToolSpec, map[string]string) {
@@ -119,6 +123,21 @@ func runChangeSimulationValidated(
 	profiles []string,
 ) (changeSimulationResult, error) {
 	return change.RunSimulationValidated(ctx, client, snapshot, maxTokens, temperature, root, profiles)
+}
+
+func runChangeSimulationValidatedWithLanguage(
+	ctx context.Context,
+	client *openAIToolClient,
+	snapshot changeSimulationSnapshot,
+	maxTokens int,
+	temperature float64,
+	root string,
+	profiles []string,
+	responseLanguage string,
+) (changeSimulationResult, error) {
+	return change.RunSimulationValidatedWithLanguage(
+		ctx, client, snapshot, maxTokens, temperature, root, profiles, responseLanguage,
+	)
 }
 
 func formatChangeSimulationResult(result changeSimulationResult) string {

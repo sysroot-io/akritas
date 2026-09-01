@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -52,6 +52,8 @@
     .header-tools { display: flex; align-items: center; gap: 10px; }
     .status { color: var(--muted); font-size: 12px; white-space: nowrap; }
     .status.ok { color: var(--accent); }
+    .status-button { padding: 5px 8px; border-color: transparent; background: transparent; }
+    .status-button:hover, .status-button:focus-visible { border-color: var(--accent-2); }
     main { max-width: 1180px; margin: 0 auto; padding: 26px 22px 44px; }
     nav { display: flex; gap: 8px; margin-bottom: 18px; }
     button, input, textarea, select { font: inherit; }
@@ -89,6 +91,12 @@
     .content pre { margin: 10px 0 14px; padding: 12px; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: #0a1115; }
     .content pre code { padding: 0; background: transparent; white-space: pre; }
     .content blockquote { margin: 10px 0; padding-left: 12px; border-left: 3px solid var(--accent-2); color: var(--muted); }
+    .content hr { margin: 16px 0; border: 0; border-top: 1px solid var(--line); }
+    .content .table-wrap { margin: 10px 0 14px; overflow-x: auto; }
+    .content table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .content th, .content td { padding: 8px 10px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+    .content th { background: #0d1419; color: var(--text); font-weight: 700; }
+    .content tbody tr:nth-child(even) { background: rgba(255,255,255,.018); }
     .message.user .content { white-space: pre-wrap; }
     .composer { padding: 14px; border-top: 1px solid var(--line); }
     textarea, input, select {
@@ -107,7 +115,20 @@
     #activity { padding: 0 18px 16px; }
     .activity-title { margin-top: 12px; color: var(--text); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
     .activity-item { margin-top: 8px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); font: 12px/1.45 ui-monospace, monospace; white-space: pre-wrap; }
+    .activity-item.ok { border-color: rgba(91,209,165,.35); color: var(--accent); }
+    .activity-item.failed { border-color: rgba(240,140,130,.45); color: var(--danger); }
     .activity-item.gap { border-color: rgba(240,140,130,.45); color: #e8b0aa; }
+    dialog { width: min(720px, calc(100vw - 32px)); max-height: min(760px, calc(100vh - 32px)); padding: 0; overflow: hidden; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 22px 80px rgba(0,0,0,.55); }
+    dialog::backdrop { background: rgba(4,8,11,.72); backdrop-filter: blur(3px); }
+    .dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+    .dialog-head h2 { margin: 0 0 3px; font-size: 16px; }
+    .dialog-head button { padding: 5px 9px; }
+    .tool-list { max-height: min(620px, calc(100vh - 140px)); padding: 10px 18px 18px; overflow-y: auto; }
+    .tool-item { padding: 12px 0; border-bottom: 1px solid var(--line); }
+    .tool-item:last-child { border-bottom: 0; }
+    .tool-name { font: 13px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--accent); overflow-wrap: anywhere; }
+    .tool-meta { margin-top: 3px; color: var(--muted); font-size: 12px; }
+    .tool-description { margin-top: 7px; color: var(--text); font-size: 13px; }
     .grid { display: grid; grid-template-columns: minmax(300px,.8fr) minmax(380px,1.2fr); gap: 18px; }
     .form { padding: 18px; }
     .field { margin-bottom: 15px; }
@@ -140,10 +161,17 @@
       <div><h1>Akritas</h1><div class="subtitle">operations assistant with approved changes</div></div>
     </div>
     <div class="header-tools">
-      <input id="api-key" class="api-key" type="password" placeholder="API key, если нужен" autocomplete="off">
-      <span id="status" class="status">проверка…</span>
+      <input id="api-key" class="api-key" type="password" placeholder="API key, if required" autocomplete="off">
+      <button id="status" class="status status-button" type="button" aria-haspopup="dialog" title="View available tools">checking...</button>
     </div>
   </header>
+  <dialog id="tools-dialog" aria-labelledby="tools-dialog-title">
+    <div class="dialog-head">
+      <div><h2 id="tools-dialog-title">Available tools</h2><div class="hint">Only tools authorized for the current Web runtime.</div></div>
+      <button id="close-tools" type="button" aria-label="Close">Close</button>
+    </div>
+    <div id="tools-list" class="tool-list"><div class="hint">Loading...</div></div>
+  </dialog>
   <main>
     <nav>
       <button class="active" data-view="chat">Chat</button>
@@ -153,16 +181,16 @@
     <section id="view-chat" class="view active">
       <div class="panel">
         <div class="panel-head">
-          <h2>Операционный чат</h2>
-          <div class="hint">Общие вопросы, RAG и разрешённые read-only MCP-инструменты.</div>
+          <h2>Operational chat</h2>
+          <div class="hint">General questions, RAG, and authorized read-only MCP tools.</div>
         </div>
-        <div id="messages"><div class="hint">Задайте вопрос о документации, инциденте, логах, метриках или конфигурации.</div></div>
+        <div id="messages"><div class="hint">Ask about documentation, incidents, logs, metrics, or configuration.</div></div>
         <div id="activity"></div>
         <div class="composer">
-          <textarea id="chat-input" placeholder="Например: найди ранбук для высокой latency и перечисли первые диагностические шаги"></textarea>
+          <textarea id="chat-input" placeholder="Example: find the runbook for high latency and list the first diagnostic steps"></textarea>
           <div class="composer-actions">
-            <label class="check"><input id="debug" type="checkbox"> показывать payload в следующем ответе</label>
-            <button id="send-chat" class="primary">Отправить</button>
+            <label class="check"><input id="debug" type="checkbox"> include payloads in the next response</label>
+            <button id="send-chat" class="primary">Send</button>
           </div>
         </div>
       </div>
@@ -171,27 +199,27 @@
     <section id="view-change" class="view">
       <div class="grid">
         <div class="panel">
-          <div class="panel-head"><h2>Подготовка изменения</h2><div class="hint">Только анализ снимка; файлы не изменяются.</div></div>
+          <div class="panel-head"><h2>Prepare a change</h2><div class="hint">Snapshot analysis only; no files are modified.</div></div>
           <div class="form">
             <div class="field"><label for="workspace">Workspace</label><select id="workspace"></select></div>
-            <div class="field"><label for="change-request">Запрос</label><textarea id="change-request">Нужно разрешить новый backend orders-v2 через nftables в production.</textarea></div>
+            <div class="field"><label for="change-request">Request</label><textarea id="change-request">Allow the new orders-v2 backend through nftables in production.</textarea></div>
             <div class="field">
-			  <label for="change-files">Файлы (необязательно), по одному относительному пути на строку</label>
-			  <textarea id="change-files" placeholder="Оставьте пустым: Akritas сам найдёт подходящие файлы"></textarea>
+			  <label for="change-files">Files (optional), one relative path per line</label>
+			  <textarea id="change-files" placeholder="Leave empty to let Akritas find the relevant files"></textarea>
             </div>
-            <div class="form-actions"><span class="hint">Без MCP, shell и Git.</span><button id="run-change" class="primary">Подготовить diff</button></div>
+            <div class="form-actions"><span class="hint">No MCP, shell, or Git.</span><button id="run-change" class="primary">Prepare diff</button></div>
           </div>
         </div>
         <div class="panel">
-          <div class="panel-head"><h2>Проверенное предложение</h2><div class="hint">Preview ничего не меняет; запись возможна только после отдельного approval.</div></div>
-          <div id="change-result" class="content"><p>Результат появится здесь.</p></div>
+          <div class="panel-head"><h2>Validated proposal</h2><div class="hint">The preview changes nothing; writing requires separate approval.</div></div>
+          <div id="change-result" class="content"><p>The result will appear here.</p></div>
 		  <div id="change-approval" class="approval" hidden></div>
         </div>
       </div>
     </section>
   </main>
   <script>
-	const state = { messages: [], pendingApproval: null };
+	const state = { messages: [], pendingApproval: null, toolCatalog: null };
     const byId = id => document.getElementById(id);
     const authHeaders = () => {
       const key = byId('api-key').value.trim();
@@ -209,7 +237,7 @@
 	  }
       return body;
     }
-    function setBusy(button, busy) { button.disabled = busy; button.dataset.label ||= button.textContent; button.textContent = busy ? 'Ожидание…' : button.dataset.label; }
+    function setBusy(button, busy) { button.disabled = busy; button.dataset.label ||= button.textContent; button.textContent = busy ? 'Waiting...' : button.dataset.label; }
     function appendInlineMarkdown(root, value) {
       const pattern = /(`[^`]+`|\*\*[^*]+\*\*)/g; let offset = 0;
       for (const match of value.matchAll(pattern)) {
@@ -219,6 +247,27 @@
         offset = match.index + token.length;
       }
       root.append(document.createTextNode(value.slice(offset)));
+    }
+    function splitMarkdownTableRow(line) {
+      const cells = []; let value = ''; let escaped = false; let inCode = false;
+      const source = line.trim().replace(/^\|/, '').replace(/\|$/, '');
+      for (const character of source) {
+        if (escaped) { value += character; escaped = false; continue; }
+        if (character === '\\') { escaped = true; continue; }
+        if (character === '`') { inCode = !inCode; value += character; continue; }
+        if (character === '|' && !inCode) { cells.push(value.trim()); value = ''; continue; }
+        value += character;
+      }
+      if (escaped) value += '\\';
+      cells.push(value.trim());
+      return cells;
+    }
+    function markdownTableAlignment(value) {
+      const cell = value.trim();
+      if (!/^:?-{3,}:?$/.test(cell)) return null;
+      if (cell.startsWith(':') && cell.endsWith(':')) return 'center';
+      if (cell.endsWith(':')) return 'right';
+      return 'left';
     }
     function renderMarkdown(root, content) {
       const lines = content.replace(/\r\n?/g, '\n').split('\n'); let paragraph = []; let list = null; let fence = null;
@@ -232,7 +281,8 @@
         if (!list || list.tagName.toLowerCase() !== type) { closeList(); list = document.createElement(type); root.append(list); }
         const item = document.createElement('li'); appendInlineMarkdown(item, value); list.append(item);
       };
-      for (const line of lines) {
+      for (let index = 0; index < lines.length; index++) {
+        const line = lines[index];
         if (fence) {
           if (/^\s*```/.test(line)) { const pre = document.createElement('pre'); const code = document.createElement('code'); code.textContent = fence.lines.join('\n'); pre.append(code); root.append(pre); fence = null; }
           else fence.lines.push(line);
@@ -240,6 +290,28 @@
         }
         const fenceStart = line.match(/^\s*```([^`]*)$/);
         if (fenceStart) { flushParagraph(); closeList(); fence = { language: fenceStart[1].trim(), lines: [] }; continue; }
+        if (/^\s{0,3}((\*\s*){3,}|(-\s*){3,}|(_\s*){3,})$/.test(line)) { flushParagraph(); closeList(); root.append(document.createElement('hr')); continue; }
+        if (line.includes('|') && index + 1 < lines.length) {
+          const headers = splitMarkdownTableRow(line);
+          const separators = splitMarkdownTableRow(lines[index + 1]);
+          const alignments = separators.map(markdownTableAlignment);
+          if (headers.length === separators.length && headers.length > 0 && alignments.every(value => value !== null)) {
+            flushParagraph(); closeList();
+            const wrapper = document.createElement('div'); wrapper.className = 'table-wrap';
+            const table = document.createElement('table'); const head = document.createElement('thead'); const headRow = document.createElement('tr');
+            headers.forEach((value, cellIndex) => { const cell = document.createElement('th'); cell.style.textAlign = alignments[cellIndex]; appendInlineMarkdown(cell, value); headRow.append(cell); });
+            head.append(headRow); table.append(head); index += 2;
+            const body = document.createElement('tbody');
+            while (index < lines.length && lines[index].trim() && lines[index].includes('|')) {
+              const values = splitMarkdownTableRow(lines[index]); const row = document.createElement('tr');
+              headers.forEach((_, cellIndex) => { const cell = document.createElement('td'); cell.style.textAlign = alignments[cellIndex]; appendInlineMarkdown(cell, values[cellIndex] || ''); row.append(cell); });
+              body.append(row); index++;
+            }
+            if (body.childElementCount) table.append(body);
+            wrapper.append(table); root.append(wrapper); index--;
+            continue;
+          }
+        }
         const heading = line.match(/^(#{1,6})\s+(.+)$/);
         if (heading) { flushParagraph(); closeList(); const node = document.createElement(`h${heading[1].length}`); appendInlineMarkdown(node, heading[2]); root.append(node); continue; }
         const unordered = line.match(/^\s*[-*+]\s+(.+)$/);
@@ -257,33 +329,52 @@
     function renderMessage(role, content) {
       const empty = byId('messages').querySelector('.hint'); if (empty) empty.remove();
       const box = document.createElement('div'); box.className = `message ${role}`;
-      const label = document.createElement('div'); label.className = 'role'; label.textContent = role === 'user' ? 'Вы' : 'Akritas';
+      const label = document.createElement('div'); label.className = 'role'; label.textContent = role === 'user' ? 'You' : 'Akritas';
       const text = document.createElement('div'); text.className = 'content';
       if (role === 'assistant') renderMarkdown(text, content); else text.textContent = content;
       box.append(label, text); byId('messages').append(box); byId('messages').scrollTop = byId('messages').scrollHeight;
     }
-    function renderActivity(items, gaps, debug) {
+    function renderActivity(items, gaps, debug, budget, runID = '', requestError = '') {
       const root = byId('activity'); root.replaceChildren();
       const title = value => { const node = document.createElement('div'); node.className = 'activity-title'; node.textContent = value; root.append(node); };
       const addItem = (text, className = '') => { const node = document.createElement('div'); node.className = `activity-item ${className}`.trim(); node.textContent = text; root.append(node); };
-      const reports = (items || []).filter(item => item.name === 'local.capability.report_missing');
-      const executed = (items || []).filter(item => item.name !== 'local.capability.report_missing');
-      title('Выполненные инструменты');
-      if (!executed.length) addItem('Диагностические инструменты не вызывались.');
+      const plans = (items || []).filter(item => item.name === 'local.investigation.submit_plan');
+      const executed = (items || []).filter(item => item.name !== 'local.investigation.submit_plan');
+      title('Run log');
+      if (runID) addItem(`Run ID: ${runID}`, 'ok');
+      if (requestError) addItem(`Request failed: ${requestError}`, 'failed');
+      if (plans.length && !(gaps || []).length) addItem('Investigation plan · ok · No unavailable checks.', 'ok');
+      if (!plans.length && !requestError) addItem('The investigation plan was not produced.');
+      title('Executed tools');
+      if (!executed.length) addItem('No diagnostic tools were called.');
       for (const item of executed) {
-        const node = document.createElement('div'); node.className = 'activity-item';
-        let text = `${item.name} · ${item.status} · ${item.id}`;
+        const node = document.createElement('div'); node.className = `activity-item ${item.status === 'ok' ? 'ok' : 'failed'}`;
+        let text = `${item.name} · ${item.status} · ${item.duration_ms || 0} ms · ${item.id}`;
         if (item.arguments) text += `\narguments: ${JSON.stringify(item.arguments)}`;
         if (item.result) text += `\nresult: ${JSON.stringify(item.result)}`;
-        if (debug && !item.arguments && !item.result) text += '\npayload не возвращён сервером';
+        if (debug && !item.arguments && !item.result) text += '\npayload was not returned by the server';
         node.textContent = text; root.append(node);
       }
-      title('Недостающие инструменты');
-      if (!(gaps || []).length) addItem(reports.length ? 'Отчёт не содержит подтверждённых пробелов.' : 'Модель не сообщила о недостающих инструментах.', 'gap');
-      for (const gap of gaps || []) addItem(`${gap.capability}\nшаг: ${gap.step}\nпричина: ${gap.reason}`, 'gap');
-      if (debug && reports.length) {
-        title('Служебный отчёт модели');
-        for (const item of reports) addItem(`${item.name} · ${item.status} · ${item.id}\narguments: ${JSON.stringify(item.arguments || {})}\nresult: ${JSON.stringify(item.result || {})}`);
+      if ((gaps || []).length) {
+        title('Unavailable checks');
+        for (const gap of gaps) addItem(`${gap.capability}\nstep: ${gap.step}\nreason: ${gap.reason}`, 'gap');
+      }
+      if (debug && plans.length) {
+        title('Model service plan');
+        for (const item of plans) addItem(`${item.name} · ${item.status} · ${item.id}\narguments: ${JSON.stringify(item.arguments || {})}\nresult: ${JSON.stringify(item.result || {})}`);
+      }
+      if (budget?.limits && budget?.usage) {
+        const limits = budget.limits; const usage = budget.usage;
+        title('Run budget');
+        addItem([
+          `Iterations: ${usage.iterations} / ${limits.max_iterations}`,
+          `Tool calls: ${usage.tool_calls} / ${limits.max_tool_calls}`,
+          `Model tokens: ${usage.model_tokens} / ${limits.max_model_tokens}`,
+          `Context tokens: ${usage.context_tokens} / ${limits.max_context_tokens}`,
+          `Tool results: ${usage.tool_result_bytes} / ${limits.max_tool_result_bytes} bytes`,
+          `Retrieved context: ${usage.retrieved_context_bytes} / ${limits.max_retrieved_context_bytes} bytes`,
+          `Duration: ${usage.duration_ms} / ${limits.max_duration_ms} ms`,
+        ].join('\n'));
       }
     }
     async function sendChat() {
@@ -292,21 +383,44 @@
       const button = byId('send-chat'); setBusy(button, true);
       try {
         const result = await api('/api/v1/chat', { method: 'POST', body: JSON.stringify({ messages: state.messages, debug: byId('debug').checked }) });
-        state.messages.push({ role: 'assistant', content: result.answer }); renderMessage('assistant', result.answer); renderActivity(result.activity, result.capability_gaps, byId('debug').checked);
-      } catch (error) { renderMessage('assistant', `Ошибка: ${error.message}`); }
+        state.messages.push({ role: 'assistant', content: result.answer }); renderMessage('assistant', result.answer); renderActivity(result.activity, result.capability_gaps, byId('debug').checked, result.budget, result.run_id || '');
+      } catch (error) {
+        state.messages.pop();
+        input.value = value;
+        renderMessage('assistant', `Error: ${error.message}`);
+        renderActivity([], [], false, null, '', error.message);
+      }
       finally { setBusy(button, false); }
     }
     async function loadWorkspaces() {
       try {
         const result = await api('/api/v1/workspaces'); const select = byId('workspace'); select.replaceChildren();
         for (const name of result.workspaces || []) { const option = document.createElement('option'); option.value = name; option.textContent = name; select.append(option); }
-        if (!select.options.length) { const option = document.createElement('option'); option.textContent = 'Нет разрешённых workspace'; option.value = ''; select.append(option); }
-      } catch (error) { byId('change-result').textContent = `Не удалось загрузить workspace: ${error.message}`; }
+        if (!select.options.length) { const option = document.createElement('option'); option.textContent = 'No authorized workspaces'; option.value = ''; select.append(option); }
+      } catch (error) { byId('change-result').textContent = `Failed to load workspaces: ${error.message}`; }
+    }
+    async function loadToolCatalog() {
+      const dialog = byId('tools-dialog'); const list = byId('tools-list');
+      if (!dialog.open) dialog.showModal();
+      list.replaceChildren(); const loading = document.createElement('div'); loading.className = 'hint'; loading.textContent = 'Loading...'; list.append(loading);
+      try {
+        const result = await api('/api/v1/tools'); state.toolCatalog = result.tools || []; list.replaceChildren();
+        if (!state.toolCatalog.length) { const empty = document.createElement('div'); empty.className = 'hint'; empty.textContent = 'No authorized tools.'; list.append(empty); return; }
+        for (const tool of state.toolCatalog) {
+          const item = document.createElement('div'); item.className = 'tool-item';
+          const name = document.createElement('div'); name.className = 'tool-name'; name.textContent = tool.name;
+          const meta = document.createElement('div'); meta.className = 'tool-meta'; meta.textContent = `permission: ${tool.permission}`;
+          const description = document.createElement('div'); description.className = 'tool-description'; description.textContent = tool.description;
+          item.append(name, meta, description); list.append(item);
+        }
+      } catch (error) {
+        state.toolCatalog = null; list.replaceChildren(); const message = document.createElement('div'); message.className = 'activity-item failed'; message.textContent = `Failed to load tools: ${error.message}`; list.append(message);
+      }
     }
     async function runChange() {
 	  const button = byId('run-change'); const output = byId('change-result'); const approval = byId('change-approval');
 	  state.pendingApproval = null; approval.hidden = true; approval.replaceChildren();
-	  setBusy(button, true); output.classList.remove('error'); output.style.whiteSpace = ''; output.textContent = 'Akritas ищет файлы и готовит изменение…';
+	  setBusy(button, true); output.classList.remove('error'); output.style.whiteSpace = ''; output.textContent = 'Akritas is finding files and preparing the change...';
       try {
         const files = byId('change-files').value.split('\n').map(x => x.trim()).filter(Boolean);
         const result = await api('/api/v1/change/simulations', { method: 'POST', body: JSON.stringify({ workspace: byId('workspace').value, request: byId('change-request').value, files }) });
@@ -315,20 +429,20 @@
 	  } catch (error) {
 		output.classList.add('error');
 		if (error.details) renderChangeDiagnostics(output, error.message, error.details);
-		else output.textContent = `Ошибка: ${error.message}`;
+		else output.textContent = `Error: ${error.message}`;
 	  }
       finally { setBusy(button, false); }
     }
 	function renderChangeDiagnostics(root, message, diagnostics) {
 	  root.style.whiteSpace = ''; root.replaceChildren();
-	  const heading = document.createElement('h3'); heading.textContent = 'Ошибка подготовки изменения'; root.append(heading);
+	  const heading = document.createElement('h3'); heading.textContent = 'Change preparation failed'; root.append(heading);
 	  const summary = document.createElement('p'); summary.textContent = message; root.append(summary);
 	  for (const item of diagnostics || []) {
 		const box = document.createElement('div'); box.className = 'diagnostic';
-		const title = document.createElement('div'); title.className = 'diagnostic-title'; title.textContent = `Попытка ${item.attempt}: ${item.stage}`;
-		const reason = document.createElement('div'); reason.textContent = item.error || 'Неизвестная ошибка';
+		const title = document.createElement('div'); title.className = 'diagnostic-title'; title.textContent = `Attempt ${item.attempt}: ${item.stage}`;
+		const reason = document.createElement('div'); reason.textContent = item.error || 'Unknown error';
 		const meta = document.createElement('div'); meta.className = 'diagnostic-meta';
-		meta.textContent = [`finish: ${item.finish_reason || 'не указан'}`, `tokens: ${item.completion_tokens || 'не указано'}`, `tool: ${item.tool_name || 'не указан'}`, `arguments: ${item.argument_bytes || 0} bytes`].join(' · ');
+		meta.textContent = [`finish: ${item.finish_reason || 'not reported'}`, `tokens: ${item.completion_tokens || 'not reported'}`, `tool: ${item.tool_name || 'not reported'}`, `arguments: ${item.argument_bytes || 0} bytes`].join(' · ');
 		box.append(title, reason, meta);
 		if (item.hint) { const hint = document.createElement('div'); hint.className = 'hint'; hint.textContent = item.hint; box.append(hint); }
 		const rawArguments = item.arguments || item.arguments_preview;
@@ -336,11 +450,11 @@
 		  let displayedArguments = rawArguments;
 		  try { displayedArguments = JSON.stringify(JSON.parse(rawArguments), null, 2); } catch (_) {}
 		  const details = document.createElement('details'); const label = document.createElement('summary');
-		  label.textContent = item.arguments ? 'Показать полный structured proposal' : 'Показать сокращённый ответ модели';
+		  label.textContent = item.arguments ? 'Show the complete structured proposal' : 'Show the truncated model response';
 		  const pre = document.createElement('pre'); const code = document.createElement('code'); code.textContent = displayedArguments; pre.append(code); details.append(label, pre); box.append(details);
 		  if (item.arguments) {
 			const actions = document.createElement('div'); actions.className = 'diagnostic-actions';
-			const download = document.createElement('button'); download.type = 'button'; download.textContent = 'Скачать proposal.json';
+			const download = document.createElement('button'); download.type = 'button'; download.textContent = 'Download proposal.json';
 			download.addEventListener('click', () => downloadTextFile(`akritas-proposal-attempt-${item.attempt || 'unknown'}.json`, displayedArguments + '\n', 'application/json'));
 			actions.append(download); box.append(actions);
 		  }
@@ -356,21 +470,21 @@
 	function renderChangeApproval(pending, files) {
 	  state.pendingApproval = pending; const root = byId('change-approval'); root.hidden = false; root.classList.remove('applied'); root.replaceChildren();
 	  const hint = document.createElement('div'); hint.className = 'hint';
-	  hint.textContent = `Будут изменены: ${files.join(', ')}. Preview действует до ${new Date(pending.expires_at).toLocaleString()}.`;
-	  const button = document.createElement('button'); button.className = 'primary'; button.textContent = 'Применить этот diff';
+	  hint.textContent = `Files to be changed: ${files.join(', ')}. The preview expires at ${new Date(pending.expires_at).toLocaleString()}.`;
+	  const button = document.createElement('button'); button.className = 'primary'; button.textContent = 'Apply this diff';
 	  button.addEventListener('click', () => applyChange(button)); root.append(hint, button);
 	}
 	async function applyChange(button) {
 	  const pending = state.pendingApproval; if (!pending) return;
-	  if (!window.confirm('Применить показанный diff к выбранному workspace? Это изменит файлы на диске.')) return;
+	  if (!window.confirm('Apply the displayed diff to the selected workspace? This will modify files on disk.')) return;
 	  setBusy(button, true);
 	  try {
 		const result = await api(`/api/v1/change/simulations/${encodeURIComponent(pending.id)}/apply`, { method: 'POST', body: JSON.stringify({ confirm: true }) });
 		state.pendingApproval = null; const root = byId('change-approval'); root.classList.add('applied'); root.replaceChildren();
-		const message = document.createElement('div'); message.className = 'hint'; message.textContent = `Изменение применено: ${(result.changed_files || []).join(', ')}. Проверьте результат и создайте commit/MR.`; root.append(message);
+		const message = document.createElement('div'); message.className = 'hint'; message.textContent = `Change applied: ${(result.changed_files || []).join(', ')}. Review the result and create a commit or merge request.`; root.append(message);
 	  } catch (error) {
-		state.pendingApproval = null; button.disabled = true; button.textContent = 'Нужен новый preview';
-		alert(`Не удалось применить diff: ${error.message}. Подготовьте новый preview перед повторной попыткой.`);
+		state.pendingApproval = null; button.disabled = true; button.textContent = 'New preview required';
+		alert(`Failed to apply the diff: ${error.message}. Prepare a new preview before trying again.`);
 	  }
 	}
     document.querySelectorAll('nav button').forEach(button => button.addEventListener('click', () => {
@@ -382,7 +496,10 @@
     byId('chat-input').addEventListener('keydown', event => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) sendChat(); });
     byId('run-change').addEventListener('click', runChange);
     byId('api-key').addEventListener('change', loadWorkspaces);
-    fetch('/health').then(r => r.json()).then(data => { byId('status').textContent = `${data.model} · ${data.tools} tools`; byId('status').classList.add('ok'); }).catch(() => { byId('status').textContent = 'недоступен'; });
+    byId('status').addEventListener('click', loadToolCatalog);
+    byId('close-tools').addEventListener('click', () => byId('tools-dialog').close());
+    byId('tools-dialog').addEventListener('click', event => { if (event.target === byId('tools-dialog')) byId('tools-dialog').close(); });
+    fetch('/health').then(r => r.json()).then(data => { byId('status').textContent = `${data.model} · ${data.tools} tools`; byId('status').classList.add('ok'); }).catch(() => { byId('status').textContent = 'unavailable'; });
   </script>
 </body>
 </html>

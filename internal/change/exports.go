@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"akritas/internal/clients/openai"
+	"akritas/internal/modeltext"
 )
 
 type Snapshot = changeSimulationSnapshot
@@ -59,6 +60,19 @@ func RunSimulation(
 	return runChangeSimulation(ctx, client, snapshot, maxTokens, temperature)
 }
 
+func RunSimulationWithLanguage(
+	ctx context.Context,
+	client *openai.Client,
+	snapshot Snapshot,
+	maxTokens int,
+	temperature float64,
+	responseLanguage string,
+) (Result, error) {
+	return runChangeSimulationWithLanguage(
+		ctx, client, snapshot, maxTokens, temperature, responseLanguage,
+	)
+}
+
 func RunSimulationValidated(
 	ctx context.Context,
 	client *openai.Client,
@@ -69,6 +83,30 @@ func RunSimulationValidated(
 	validatorProfiles []string,
 ) (Result, error) {
 	return runChangeSimulationValidated(ctx, client, snapshot, maxTokens, temperature, root, validatorProfiles)
+}
+
+func RunSimulationValidatedWithLanguage(
+	ctx context.Context,
+	client *openai.Client,
+	snapshot Snapshot,
+	maxTokens int,
+	temperature float64,
+	root string,
+	validatorProfiles []string,
+	responseLanguage string,
+) (Result, error) {
+	return runChangeSimulationValidatedWithLanguage(
+		ctx, client, snapshot, maxTokens, temperature, root, validatorProfiles,
+		responseLanguage,
+	)
+}
+
+func SimulationSystemPromptForLanguage(responseLanguage string) (string, error) {
+	responseLanguage, err := modeltext.NormalizeLanguageTag(responseLanguage)
+	if err != nil {
+		return "", err
+	}
+	return changeSimulationSystemPrompt + "\n\n" + modeltext.LanguageInstruction(responseLanguage), nil
 }
 
 func FormatResult(result Result) string { return formatChangeSimulationResult(result) }

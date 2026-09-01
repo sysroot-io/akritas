@@ -9,6 +9,7 @@ import (
 	"akritas/internal/clients/openai"
 	"akritas/internal/corpus"
 	"akritas/internal/mcp"
+	"akritas/internal/modeltext"
 	"akritas/internal/rag"
 	"akritas/internal/web"
 )
@@ -49,6 +50,12 @@ var buildChangeSimulationPrompt = change.BuildPrompt
 var formatChangeSimulationResult = change.FormatResult
 var loadChangeSimulationSnapshot = change.LoadSnapshot
 var runChangeSimulation = change.RunSimulation
+var runChangeSimulationWithLanguage = change.RunSimulationWithLanguage
+var changeSimulationSystemPromptForLanguage = change.SimulationSystemPromptForLanguage
+
+const defaultResponseLanguage = modeltext.DefaultLanguage
+
+var normalizeResponseLanguage = modeltext.NormalizeLanguageTag
 
 func loadChangeRequest(root, requestPath string) (string, string, string, error) {
 	return change.LoadRequest(root, requestPath)
@@ -87,17 +94,17 @@ var NewToolRegistry = mcp.NewToolRegistry
 var StartMCPHost = mcp.StartMCPHost
 
 const localRAGSearchToolName = rag.SearchToolName
-const localCapabilityGapToolName = web.CapabilityGapToolName
+const localInvestigationPlanToolName = web.InvestigationPlanToolName
 
 var RegisterRAGSearchTool = rag.RegisterRAGSearchTool
-var registerOpsCapabilityGapTool = web.RegisterCapabilityGapTool
+var registerOpsInvestigationPlanTool = web.RegisterInvestigationPlanTool
 var registerReadOnlyTools = web.RegisterReadOnlyTools
 
 func newOpsServer(
 	client *openAIToolClient,
 	registry *ToolRegistry,
 	policy NamedToolPolicy,
-	modelID, apiKey string,
+	modelID, apiKey, responseLanguage string,
 	defaultMaxTokens, maxTokensLimit int,
 	defaultTemperature float64,
 	maxToolCalls int,
@@ -105,7 +112,7 @@ func newOpsServer(
 	workspaces map[string]opsWorkspace,
 ) (*web.Server, error) {
 	return web.NewServer(
-		client, registry, policy, modelID, apiKey, defaultMaxTokens,
+		client, registry, policy, modelID, apiKey, responseLanguage, defaultMaxTokens,
 		maxTokensLimit, defaultTemperature, maxToolCalls, requestTimeout, workspaces,
 	)
 }

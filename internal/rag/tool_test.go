@@ -24,7 +24,7 @@ func TestRAGSearchToolIsReadOnlyBoundedAndStrict(t *testing.T) {
 
 	call := mcp.ToolCall{
 		ID: "call-1", Name: localRAGSearchToolName,
-		Arguments: json.RawMessage(`{"query":"кто разработал Go"}`),
+		Arguments: json.RawMessage(`{"query":"who developed Go"}`),
 	}
 	denied := registry.Execute(context.Background(), call, mcp.StaticToolPolicy{
 		Allowed: map[mcp.ToolPermission]bool{},
@@ -58,44 +58,44 @@ func TestRAGSearchToolIsReadOnlyBoundedAndStrict(t *testing.T) {
 }
 
 func TestCompactRAGToolTextKeepsContextAroundQueryBearingSentence(t *testing.T) {
-	text := "Первая вводная фраза без чисел. Длина реки составляет 473 км, и она впадает в Оку. Заключение."
-	compact := compactRAGToolText(text, "какова длина и куда впадает река", 100)
-	if !strings.Contains(compact, "473") || !strings.Contains(compact, "Оку") {
+	text := "An introductory sentence without numbers. The river is 473 km long and flows into the Oka. Conclusion."
+	compact := compactRAGToolText(text, "how long is the river and where does it flow", 100)
+	if !strings.Contains(compact, "473") || !strings.Contains(compact, "Oka") {
 		t.Fatalf("query-bearing context was not selected: %q", compact)
 	}
 }
 
 func TestCompactRAGToolTextKeepsShortRunbookWhole(t *testing.T) {
-	text := `# Runbook: высокая загрузка CPU
+	text := `# Runbook: high CPU usage
 
-## Проверки
+## Checks
 
-1. Проверить CPU за последние 30 минут.
-2. Сравнить нагрузку между pod.
-3. Проверить throttling.
-4. Посмотреть ошибки и latency.
-5. Проверить последние deployments.
+1. Check CPU over the last 30 minutes.
+2. Compare load across pods.
+3. Check throttling.
+4. Review errors and latency.
+5. Check recent deployments.
 
-## Возможные причины
+## Possible causes
 
-- рост входящего трафика;
-- бесконечный цикл.`
+- increased incoming traffic;
+- an infinite loop.`
 	compact := compactRAGToolText(text, "high cpu", 800)
 	if compact != text {
 		t.Fatalf("short runbook was compacted:\n%s", compact)
 	}
-	if !strings.Contains(compact, "5. Проверить последние deployments.") {
+	if !strings.Contains(compact, "5. Check recent deployments.") {
 		t.Fatalf("runbook checklist is missing: %q", compact)
 	}
 }
 
 func TestCompactRAGToolTextBoundsLongRunbookWithFollowingContext(t *testing.T) {
-	text := "Введение без совпадений.\n\n# High CPU\n\n## Проверки\n\n1. Проверить CPU.\n2. Проверить throttling.\n" + strings.Repeat("Дополнение. ", 30)
+	text := "Introduction without matches.\n\n# High CPU\n\n## Checks\n\n1. Check CPU.\n2. Check throttling.\n" + strings.Repeat("Additional context. ", 30)
 	compact := compactRAGToolText(text, "high cpu", 120)
 	if len([]rune(compact)) > 120 {
 		t.Fatalf("context has %d runes, limit 120", len([]rune(compact)))
 	}
-	if !strings.Contains(compact, "## Проверки") || !strings.Contains(compact, "1. Проверить CPU") {
+	if !strings.Contains(compact, "## Checks") || !strings.Contains(compact, "1. Check CPU") {
 		t.Fatalf("context following the matching heading is missing: %q", compact)
 	}
 }
@@ -103,8 +103,8 @@ func TestCompactRAGToolTextBoundsLongRunbookWithFollowingContext(t *testing.T) {
 func testRAGIndex(t *testing.T) *RAGIndex {
 	t.Helper()
 	chunks := []RAGChunk{
-		{DocumentID: "go", Title: "Go", Chunk: 0, Source: "test", URL: "https://go.dev", Text: "Go разработали в Google Роберт Гризмер, Роб Пайк и Кен Томпсон.", Tokens: 10},
-		{DocumentID: "python", Title: "Python", Chunk: 0, Source: "test", Text: "Python создал Гвидо ван Россум.", Tokens: 6},
+		{DocumentID: "go", Title: "Go", Chunk: 0, Source: "test", URL: "https://go.dev", Text: "Go was developed at Google by Robert Griesemer, Rob Pike, and Ken Thompson.", Tokens: 10},
+		{DocumentID: "python", Title: "Python", Chunk: 0, Source: "test", Text: "Python was created by Guido van Rossum.", Tokens: 6},
 	}
 	index := &RAGIndex{
 		Version: ragIndexVersion, ManifestSHA256: strings.Repeat("a", 64),

@@ -207,5 +207,5 @@ func isRAGContextBoundary(value rune) bool {
 }
 
 func RAGSearchToolCatalogPrompt() string {
-	return `Инструмент: local.rag.search {"query":string,"top_k"?:integer} - read-only поиск в локальной базе. Для поиска сначала выведи TOOL_CALL с JSON. TOOL_RESULT добавляет host. Отвечай только по его источникам со ссылкой вида [1]; без подтверждения сообщи, что ответа нет.`
+	return `Tool: local.rag.search {"query":string,"top_k"?:integer} - read-only search of the local knowledge base. To search, first output a TOOL_CALL with JSON. The host adds TOOL_RESULT. Answer only from its sources and cite them as [1]; if the sources do not support an answer, say that no answer is available.`
 }

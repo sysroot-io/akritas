@@ -20,7 +20,9 @@ and Alertmanager fields are untrusted.
    is configured.
 2. Request, history, tool, result, snapshot, and proposal sizes are bounded.
 3. MCP tools require explicit configuration authorization. The Web runtime
-   copies only read-only definitions into its execution registry.
+   copies only authorized read-only definitions into its execution registry.
+   A forced investigation plan may select only from that filtered catalog; the
+   host validates every selected tool and its arguments before execution.
 4. Local retrieval exposes a fixed index and accepts no model-controlled file
    path.
 5. Change proposals use a forced function and strict JSON decoding.
@@ -39,6 +41,13 @@ are interpreted pessimistically. A tool is callable only when its name is
 allowed and its permission is within the active policy. The Web chat runtime
 never publishes write or dangerous tools.
 
+Runbook and RAG text is guidance, not authority. Plain text such as an SSH or
+restart instruction does not create a tool, grant a permission, or bypass a Run
+budget. The model proposes a structured investigation plan from the catalog it
+receives. The host rejects unavailable tools, excludes denied and non-read
+tools, validates arguments with the registered tool definition, executes the
+accepted checks, and records their results.
+
 Workspace access is configured by operators. API users receive workspace names,
 not absolute roots. Possession of API access currently grants access to every
 configured workspace and the ability to apply a valid pending change. Per-user
@@ -49,8 +58,21 @@ workspace authorization is not implemented.
 - API keys and authorization headers must never enter audit events.
 - Tool arguments and results are omitted from ordinary audit events; only
   bounded metadata and status are retained.
+- The bundled VictoriaMetrics MCP adapter uses an operator-configured endpoint,
+  tenant headers, and credential environment variables. Model tool arguments
+  cannot select a host, set credentials, or invoke write APIs. HTTP duration and
+  decompressed JSON response size are bounded.
+- Run budgets are calculated and enforced by the host. Missing upstream token
+  usage is charged conservatively rather than treated as zero.
+- Structured investigation evidence can reference only host-created tool-call
+  IDs. Model-provided confidence is never an authorization input.
 - Debug responses can expose repository, RAG, log, or MCP data and are disabled
   by default.
+- The VictoriaMetrics MCP `-debug` flag writes a bounded preview of failed HTTP
+  response bodies to stderr. It omits request headers, credentials, query
+  arguments, and successful bodies, but the preview can still contain
+  operational or proxy-generated sensitive data. Debug logging is disabled by
+  default and should be enabled only during troubleshooting.
 - Full rejected proposals are returned only in the request response and are not
   written to server logs.
 - Audit storage is append-only from the application's perspective and must be
@@ -74,3 +96,9 @@ for executable validators near production.
   non-repudiation.
 - A malicious authorized MCP server can return deceptive data or consume local
   resources within process and timeout limits.
+- An expensive MetricsQL query can consume VictoriaMetrics resources until the
+  configured HTTP timeout. Apply query limits and read-only tenant policy at
+  VictoriaMetrics or its authentication proxy as well as in Akritas.
+- VictoriaMetrics or an intermediary can place sensitive data in an error
+  response. Operators who enable MCP debug logging must protect and expire the
+  resulting stderr logs.

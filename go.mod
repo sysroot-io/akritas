@@ -1,5 +1,5 @@
 module akritas
 
-go 1.22
+go 1.25
 
 toolchain go1.26.6

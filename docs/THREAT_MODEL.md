@@ -36,15 +36,17 @@ Akritas host ---- OpenAI-compatible model (untrusted output)
 | Threat | Existing or required control | Residual risk |
 |---|---|---|
 | Unauthenticated API use | Loopback default, Bearer authentication, reverse proxy guidance | Instance-wide shared token |
-| Prompt injection from documents or alerts | Inputs labelled untrusted, fixed system prompts, host-side policy and execution evidence | Model answer can still be misleading |
-| MCP privilege escalation | Explicit allowlist, pessimistic permissions, Web read-only filtering | Authorized MCP process retains its OS permissions |
+| Prompt injection from documents or alerts | Inputs labelled untrusted, fixed system prompts, runbook text grants no capability, host-side policy and execution evidence | Model can still select an irrelevant but authorized read-only query or give misleading advice |
+| MCP privilege escalation | Explicit allowlist, pessimistic permissions, Web read-only filtering, host validation of every planned tool and argument | Authorized MCP process retains its OS permissions |
+| VictoriaMetrics scope escape | Operator-fixed URL, tenant headers, credentials, read-only endpoints, bounded responses | MetricsQL may still select every series visible to the configured VictoriaMetrics identity |
 | Arbitrary file read | Fixed RAG index, canonical workspace paths, traversal and symlink checks | Authorized workspace files remain visible to change preparation |
 | Malicious structured proposal | Forced function, strict JSON, limits, exact replacements, host-generated diff | Semantically harmful but syntactically valid changes require human review |
 | Approval theft or replay | Random bounded-lifetime ID, authentication, one-time consumption | Shared API token provides no per-user attribution |
 | TOCTOU during Apply | Byte recheck, target-absence recheck, no-clobber create | Multi-file Apply is not crash-atomic |
-| Secret leakage | Discovery exclusions, validation-copy exclusions, environment sanitization, bounded logs | Explicitly selected regular files can contain sensitive content |
+| Secret leakage | Discovery exclusions, validation-copy exclusions, environment sanitization, bounded logs, disabled-by-default VictoriaMetrics error-body previews | Explicitly selected files and debug error bodies can contain sensitive content |
 | Validator code execution | Opt-in profiles, fixed commands, offline Go settings, timeout, temp copy | Not an OS sandbox; direct network access remains possible |
-| Resource exhaustion | HTTP/tool/result limits, timeouts, one generation slot, bounded pending approvals | Authorized expensive requests can still consume model time |
+| Resource exhaustion | Host-owned Run budgets for duration, model calls, planned and adaptive tool calls, context, model tokens, and aggregate results; one generation slot; bounded MCP HTTP duration and response size; bounded pending approvals | Expensive metrics queries and other authorized requests can still consume resources up to configured backend and host limits |
+| Fabricated investigation evidence | Strict result schema and allowlisted host-created evidence references | A valid reference does not guarantee that the model interpreted the evidence correctly |
 | Audit deletion or modification | Durable append-only application writes, restrictive volume permissions, backups | Host administrator can alter files; no signed log chain yet |
 | Compromised upstream model | No direct filesystem or production access; host validates every action | Model can provide deceptive advice or repeatedly invalid proposals |
 

@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"akritas/internal/investigation"
 )
 
 const (
@@ -31,17 +33,18 @@ const (
 )
 
 type Run struct {
-	ID          string            `json:"id"`
-	Source      string            `json:"source"`
-	Actor       string            `json:"actor"`
-	Workspace   string            `json:"workspace,omitempty"`
-	Model       string            `json:"model,omitempty"`
-	Status      RunStatus         `json:"status"`
-	StartedAt   time.Time         `json:"started_at"`
-	CompletedAt *time.Time        `json:"completed_at,omitempty"`
-	Error       string            `json:"error,omitempty"`
-	Metadata    map[string]string `json:"metadata,omitempty"`
-	Events      []Event           `json:"events,omitempty"`
+	ID            string                `json:"id"`
+	Source        string                `json:"source"`
+	Actor         string                `json:"actor"`
+	Workspace     string                `json:"workspace,omitempty"`
+	Model         string                `json:"model,omitempty"`
+	Status        RunStatus             `json:"status"`
+	StartedAt     time.Time             `json:"started_at"`
+	CompletedAt   *time.Time            `json:"completed_at,omitempty"`
+	Error         string                `json:"error,omitempty"`
+	Metadata      map[string]string     `json:"metadata,omitempty"`
+	Events        []Event               `json:"events,omitempty"`
+	Investigation *investigation.Result `json:"investigation,omitempty"`
 }
 
 type Event struct {
@@ -53,15 +56,16 @@ type Event struct {
 }
 
 type record struct {
-	Version int               `json:"version"`
-	Kind    string            `json:"kind"`
-	Run     *Run              `json:"run,omitempty"`
-	RunID   string            `json:"run_id,omitempty"`
-	Event   *Event            `json:"event,omitempty"`
-	Status  RunStatus         `json:"status,omitempty"`
-	Time    *time.Time        `json:"time,omitempty"`
-	Error   string            `json:"error,omitempty"`
-	Meta    map[string]string `json:"metadata,omitempty"`
+	Version       int                   `json:"version"`
+	Kind          string                `json:"kind"`
+	Run           *Run                  `json:"run,omitempty"`
+	RunID         string                `json:"run_id,omitempty"`
+	Event         *Event                `json:"event,omitempty"`
+	Status        RunStatus             `json:"status,omitempty"`
+	Time          *time.Time            `json:"time,omitempty"`
+	Error         string                `json:"error,omitempty"`
+	Meta          map[string]string     `json:"metadata,omitempty"`
+	Investigation *investigation.Result `json:"investigation,omitempty"`
 }
 
 type Store struct {
@@ -146,6 +150,16 @@ func (store *Store) applyRecord(item record) error {
 		run.Status, run.CompletedAt = item.Status, item.Time
 		run.Error = boundedValue(item.Error)
 		run.Metadata = mergeMetadata(run.Metadata, item.Meta)
+	case "investigation_result":
+		run := store.runs[item.RunID]
+		if run == nil || run.Status != RunRunning || run.Investigation != nil || item.Investigation == nil {
+			return fmt.Errorf("invalid investigation result for %q", item.RunID)
+		}
+		result := item.Investigation.Normalized()
+		if err := result.Validate(runEvidenceReferences(run)); err != nil {
+			return fmt.Errorf("invalid investigation result for %q: %w", item.RunID, err)
+		}
+		run.Investigation = cloneInvestigation(&result)
 	default:
 		return fmt.Errorf("unknown audit record kind %q", item.Kind)
 	}
@@ -226,6 +240,31 @@ func (store *Store) FinishRun(runID string, status RunStatus, runError string, m
 	}
 	run.Status, run.CompletedAt, run.Error = status, &now, item.Error
 	run.Metadata = mergeMetadata(run.Metadata, item.Meta)
+	return nil
+}
+
+func (store *Store) SetInvestigationResult(runID string, result investigation.Result) error {
+	if store == nil {
+		return fmt.Errorf("audit store is nil")
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	run := store.runs[runID]
+	if run == nil || run.Status != RunRunning || run.Investigation != nil {
+		return fmt.Errorf("audit run %q cannot accept an investigation result", runID)
+	}
+	result = result.Normalized()
+	if err := result.Validate(runEvidenceReferences(run)); err != nil {
+		return err
+	}
+	stored := cloneInvestigation(&result)
+	if err := store.append(record{
+		Version: storeVersion, Kind: "investigation_result", RunID: runID,
+		Investigation: stored,
+	}); err != nil {
+		return err
+	}
+	run.Investigation = stored
 	return nil
 }
 
@@ -349,6 +388,7 @@ func cloneRun(run *Run) *Run {
 	clone := *run
 	clone.Metadata = sanitizedMetadata(run.Metadata)
 	clone.Events = make([]Event, len(run.Events))
+	clone.Investigation = cloneInvestigation(run.Investigation)
 	for index := range run.Events {
 		clone.Events[index] = cloneEvent(run.Events[index])
 	}
@@ -356,5 +396,32 @@ func cloneRun(run *Run) *Run {
 		completed := *run.CompletedAt
 		clone.CompletedAt = &completed
 	}
+	return &clone
+}
+
+func runEvidenceReferences(run *Run) map[string]struct{} {
+	references := make(map[string]struct{})
+	if run == nil {
+		return references
+	}
+	for _, event := range run.Events {
+		if event.Type != "tool_call" {
+			continue
+		}
+		if callID := strings.TrimSpace(event.Metadata["call_id"]); callID != "" {
+			references["tool-call:"+callID] = struct{}{}
+		}
+	}
+	return references
+}
+
+func cloneInvestigation(result *investigation.Result) *investigation.Result {
+	if result == nil {
+		return nil
+	}
+	clone := *result
+	clone.Evidence = append([]string(nil), result.Evidence...)
+	clone.AffectedComponents = append([]string(nil), result.AffectedComponents...)
+	clone.RecommendedActions = append([]string(nil), result.RecommendedActions...)
 	return &clone
 }

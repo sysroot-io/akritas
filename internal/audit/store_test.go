@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"akritas/internal/investigation"
 )
 
 func TestStorePersistsRunLifecycleAndRedactsMetadata(t *testing.T) {
@@ -20,8 +22,20 @@ func TestStorePersistsRunLifecycleAndRedactsMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := store.AddEvent(run.ID, "tool_call", "ok", map[string]string{
-		"tool": "local.echo", "token": "secret",
+		"tool": "local.echo", "call_id": "call_1", "token": "secret",
 	}); err != nil {
+		t.Fatal(err)
+	}
+	result := investigation.Result{
+		FindingStatus:      investigation.FindingConfirmed,
+		Actionability:      investigation.ActionRequiresHuman,
+		Confidence:         investigation.ConfidenceHigh,
+		Summary:            "The check confirmed the finding.",
+		Evidence:           []string{"tool-call:call_1"},
+		AffectedComponents: []string{"backend"},
+		RecommendedActions: []string{"Review the result."},
+	}
+	if err := store.SetInvestigationResult(run.ID, result); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.FinishRun(run.ID, RunSucceeded, "", map[string]string{"answer_bytes": "12"}); err != nil {
@@ -47,6 +61,7 @@ func TestStorePersistsRunLifecycleAndRedactsMetadata(t *testing.T) {
 	loaded, exists := reopened.Get(run.ID)
 	if !exists || loaded.Status != RunSucceeded || len(loaded.Events) != 1 ||
 		loaded.Events[0].Metadata["tool"] != "local.echo" ||
+		loaded.Investigation == nil || loaded.Investigation.Summary != result.Summary ||
 		loaded.Metadata["request_kind"] != "chat" || loaded.Metadata["answer_bytes"] != "12" {
 		t.Fatalf("unexpected reloaded run: %+v", loaded)
 	}

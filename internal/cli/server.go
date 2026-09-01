@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"akritas/internal/audit"
+	"akritas/internal/runbudget"
 )
 
 func runOpsServer(arguments []string) {
@@ -20,6 +21,7 @@ func runOpsServer(arguments []string) {
 	modelID := flags.String("model", "akritas", "model ID exposed by this server")
 	upstreamAPIKeyEnvironment := flags.String("upstream-api-key-env", "OPENAI_API_KEY", "environment variable containing upstream API key")
 	apiKeyEnvironment := flags.String("api-key-env", "AKRITAS_API_KEY", "environment variable containing inbound Bearer API key")
+	responseLanguage := flags.String("response-language", defaultResponseLanguage, "BCP 47 language tag for model-generated prose; the Web UI remains English")
 	ragIndexPath := flags.String("rag-index", "", "local RAG index; empty disables RAG")
 	mcpConfigPath := flags.String("mcp-config", "", "MCP configuration; only authorized read tools are exposed")
 	workspaceConfigPath := flags.String("workspace-config", "", "strict JSON workspace catalog; roots are relative to the config file")
@@ -29,6 +31,11 @@ func runOpsServer(arguments []string) {
 	defaultMaxTokens := flags.Int("max-tokens", 1024, "default response token limit")
 	maxTokensLimit := flags.Int("max-tokens-limit", 4096, "hard response token limit")
 	maxToolCalls := flags.Int("max-tool-calls", 8, "maximum read-only tool calls per chat request")
+	maxIterations := flags.Int("max-iterations", 12, "maximum upstream model calls per Run")
+	maxToolResultBytes := flags.Int("max-tool-result-bytes", 2*1024*1024, "maximum aggregate tool result bytes per Run")
+	maxRetrievedContextBytes := flags.Int("max-retrieved-context-bytes", 128*1024, "maximum retrieved context bytes per Run")
+	maxContextTokens := flags.Int("max-context-tokens", 40000, "conservative host-counted context token limit per Run")
+	maxModelTokens := flags.Int("max-model-tokens", 16384, "maximum aggregate model output tokens per Run")
 	temperature := flags.Float64("temperature", 0.2, "default model sampling temperature")
 	requestTimeout := flags.Duration("request-timeout", 10*time.Minute, "upstream request and generation timeout")
 	var workspaceValues repeatedStringFlag
@@ -38,9 +45,15 @@ func runOpsServer(arguments []string) {
 	_ = flags.Parse(arguments)
 	if strings.TrimSpace(*address) == "" || strings.TrimSpace(*modelID) == "" ||
 		*searchTopK <= 0 || *resultRunes <= 0 || *defaultMaxTokens <= 0 ||
-		*maxTokensLimit < *defaultMaxTokens || *maxToolCalls < 0 ||
+		*maxTokensLimit < *defaultMaxTokens || *maxToolCalls < 0 || *maxIterations <= 0 ||
+		*maxToolResultBytes <= 0 || *maxRetrievedContextBytes <= 0 ||
+		*maxRetrievedContextBytes > *maxToolResultBytes || *maxContextTokens <= 0 || *maxModelTokens <= 0 ||
 		*temperature < 0 || *requestTimeout <= 0 {
 		panic("serve requires valid addresses, names and generation limits")
+	}
+	normalizedResponseLanguage, err := normalizeResponseLanguage(*responseLanguage)
+	if err != nil {
+		panic(err)
 	}
 	workspaces, err := parseOpsWorkspaces(workspaceValues)
 	if err != nil {
@@ -82,10 +95,10 @@ func runOpsServer(arguments []string) {
 	}
 	registry := NewToolRegistry()
 	policy := NamedToolPolicy{Allowed: make(map[string]bool)}
-	if err := registerOpsCapabilityGapTool(registry); err != nil {
+	if err := registerOpsInvestigationPlanTool(registry); err != nil {
 		panic(err)
 	}
-	policy.Allowed[localCapabilityGapToolName] = true
+	policy.Allowed[localInvestigationPlanToolName] = true
 	var host *MCPHost
 	ignoredMCPTools := 0
 	if strings.TrimSpace(*mcpConfigPath) != "" {
@@ -141,10 +154,19 @@ func runOpsServer(arguments []string) {
 	}
 	server, err := newOpsServer(
 		client, registry, policy, strings.TrimSpace(*modelID), inboundAPIKey,
+		normalizedResponseLanguage,
 		*defaultMaxTokens, *maxTokensLimit, *temperature, *maxToolCalls,
 		*requestTimeout, workspaces,
 	)
 	if err != nil {
+		panic(err)
+	}
+	if err := server.SetRunBudget(runbudget.Limits{
+		MaxDuration: *requestTimeout, MaxIterations: *maxIterations,
+		MaxToolCalls: *maxToolCalls, MaxToolResultBytes: *maxToolResultBytes,
+		MaxRetrievedContextBytes: *maxRetrievedContextBytes,
+		MaxContextTokens:         *maxContextTokens, MaxModelTokens: *maxModelTokens,
+	}); err != nil {
 		panic(err)
 	}
 	server.SetValidatorProfiles(commonValidatorProfiles)
@@ -168,8 +190,8 @@ func runOpsServer(arguments []string) {
 		IdleTimeout:       2 * time.Minute,
 	}
 	fmt.Printf(
-		"Akritas Web UI: http://%s model=%s upstream=%s tools=%d workspaces=%d approved_changes=true\n",
-		*address, *modelID, client.Model, len(registry.Definitions()), len(workspaces),
+		"Akritas Web UI: http://%s model=%s upstream=%s response_language=%s tools=%d workspaces=%d approved_changes=true\n",
+		*address, *modelID, client.Model, normalizedResponseLanguage, len(registry.Definitions()), len(workspaces),
 	)
 	if ignoredMCPTools > 0 {
 		fmt.Printf("Ignored non-read MCP tools: %d\n", ignoredMCPTools)
