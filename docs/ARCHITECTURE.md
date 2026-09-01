@@ -22,6 +22,13 @@ context, and tool schemas, but it does not read files or connect to production
 on its own. The host remains the source of truth for actions that were actually
 performed.
 
+Global model behavior is operator-controlled through a bounded UTF-8 Markdown
+file, `instructions/SYSTEM.md` by default. The OpenAI client prepends the loaded
+content to the first system message of every model request. Task-specific
+prompts remain coupled to their schemas and host-side implementations and
+follow the global instructions. The file affects model behavior but does not
+grant capabilities or alter host authorization.
+
 The upstream model remains outside the project boundary. Akritas can use
 `llama-server`, OpenRouter, or another OpenAI-compatible service without
 depending on model-specific Go packages, checkpoints, or tokenizer formats.

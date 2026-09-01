@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	akritasinstructions "akritas/internal/instructions"
 )
 
 func runChangeSimulationCLI(arguments []string) {
@@ -15,6 +17,7 @@ func runChangeSimulationCLI(arguments []string) {
 	baseURL := flags.String("base-url", "http://127.0.0.1:8080/v1", "OpenAI-compatible API base URL ending in /v1")
 	model := flags.String("model", "", "model ID; empty discovers the first /v1/models entry")
 	apiKeyEnvironment := flags.String("api-key-env", "OPENAI_API_KEY", "environment variable containing the API key; empty disables authentication")
+	systemInstructionsPath := flags.String("system-instructions", akritasinstructions.DefaultPath, "UTF-8 Markdown file with global model instructions")
 	responseLanguage := flags.String("response-language", defaultResponseLanguage, "BCP 47 language tag for model-generated prose")
 	root := flags.String("root", "", "snapshot root directory")
 	requestPath := flags.String("request", "", "change request file relative to root")
@@ -29,6 +32,10 @@ func runChangeSimulationCLI(arguments []string) {
 		panic("simulate-change requires valid token, temperature and timeout limits")
 	}
 	normalizedResponseLanguage, err := normalizeResponseLanguage(*responseLanguage)
+	if err != nil {
+		panic(err)
+	}
+	systemInstructions, err := akritasinstructions.Load(*systemInstructionsPath)
 	if err != nil {
 		panic(err)
 	}
@@ -49,6 +56,7 @@ func runChangeSimulationCLI(arguments []string) {
 		if err != nil {
 			panic(err)
 		}
+		systemPrompt = systemInstructions + "\n\n" + systemPrompt
 		fmt.Printf(
 			"SYSTEM\n%s\n\nUSER\n%s\n\nTOOL %s\n%s\n\nTOOL_CHOICE\nrequired\n",
 			systemPrompt, userPrompt,
@@ -66,6 +74,9 @@ func runChangeSimulationCLI(arguments []string) {
 		&http.Client{Timeout: *requestTimeout},
 	)
 	if err != nil {
+		panic(err)
+	}
+	if err := client.SetSystemInstructions(systemInstructions); err != nil {
 		panic(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), *requestTimeout)

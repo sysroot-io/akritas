@@ -40,6 +40,12 @@ list remains an expert override and does not run the discovery planner.
 
 ## Model Contract
 
+The global instructions selected by `-system-instructions` are placed first in
+the model system message. The change-specific contract described below follows
+them. The default file is `instructions/SYSTEM.md`; the same option is supported
+by both `serve` and `simulate-change`. The `-print-prompt` output includes the
+global file so it remains an exact representation of the request.
+
 The OpenAI request contains only the `akritas_propose_edits` function and
 `tool_choice=required`. Its arguments have this shape:
 

@@ -15,6 +15,7 @@ RUN apt-get update \
     && install -d -o akritas -g akritas /var/lib/akritas/audit /workspaces
 
 COPY --from=build /out/akritas /usr/local/bin/akritas
+COPY --chown=akritas:akritas instructions /var/lib/akritas/instructions
 
 USER akritas
 WORKDIR /var/lib/akritas

@@ -100,6 +100,7 @@ type openAIToolClient struct {
 	Model               string
 	APIKey              string
 	HTTPClient          *http.Client
+	systemInstructions  string
 	tokenLimitParameter atomic.Uint32
 }
 
@@ -121,6 +122,20 @@ type ToolLoopResult = openAIToolLoopResult
 
 func NewToolClient(baseURL, model, apiKey string, client *http.Client) (*Client, error) {
 	return newOpenAIToolClient(baseURL, model, apiKey, client)
+}
+
+// SetSystemInstructions configures host-owned instructions that are prepended
+// to the first system message of every model request.
+func (client *openAIToolClient) SetSystemInstructions(value string) error {
+	if client == nil {
+		return fmt.Errorf("OpenAI client is nil")
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("system instructions are empty")
+	}
+	client.systemInstructions = value
+	return nil
 }
 
 func newOpenAIToolClient(baseURL, model, apiKey string, client *http.Client) (*openAIToolClient, error) {
@@ -204,6 +219,20 @@ func (client *openAIToolClient) completeWithToolChoice(
 	maxTokens int,
 	temperature float64,
 ) (openAIToolMessage, error) {
+	messages = client.withSystemInstructions(messages)
+	return client.completeWithToolChoicePrepared(
+		ctx, messages, tools, toolChoice, maxTokens, temperature,
+	)
+}
+
+func (client *openAIToolClient) completeWithToolChoicePrepared(
+	ctx context.Context,
+	messages []openAIToolMessage,
+	tools []openAIToolSpec,
+	toolChoice string,
+	maxTokens int,
+	temperature float64,
+) (openAIToolMessage, error) {
 	parallel := false
 	input := openAIToolRequest{
 		Model: client.Model, Messages: messages, Tools: tools,
@@ -246,6 +275,26 @@ func (client *openAIToolClient) completeWithToolChoice(
 		return message, nil
 	}
 	return openAIToolMessage{}, fmt.Errorf("OpenAI token-limit parameter negotiation failed")
+}
+
+func (client *openAIToolClient) withSystemInstructions(messages []openAIToolMessage) []openAIToolMessage {
+	if client == nil || client.systemInstructions == "" {
+		return messages
+	}
+	prepared := make([]openAIToolMessage, 0, len(messages)+1)
+	if len(messages) > 0 && messages[0].Role == "system" {
+		prepared = append(prepared, messages...)
+		content := client.systemInstructions
+		if messages[0].Content != nil && strings.TrimSpace(*messages[0].Content) != "" {
+			content += "\n\n" + strings.TrimSpace(*messages[0].Content)
+		}
+		prepared[0].Content = &content
+		return prepared
+	}
+	content := client.systemInstructions
+	prepared = append(prepared, openAIToolMessage{Role: "system", Content: &content})
+	prepared = append(prepared, messages...)
+	return prepared
 }
 
 func (request *openAIToolRequest) setTokenLimit(parameter openAITokenLimitParameter, value int) {
@@ -357,6 +406,7 @@ func (client *openAIToolClient) completeWithToolChoiceBudgeted(
 	if tracker == nil {
 		return client.completeWithToolChoice(ctx, messages, tools, toolChoice, maxTokens, temperature)
 	}
+	messages = client.withSystemInstructions(messages)
 	contextPayload, err := json.Marshal(struct {
 		Messages []openAIToolMessage `json:"messages"`
 		Tools    []openAIToolSpec    `json:"tools,omitempty"`
@@ -371,7 +421,7 @@ func (client *openAIToolClient) completeWithToolChoiceBudgeted(
 	if err != nil {
 		return openAIToolMessage{}, err
 	}
-	message, callErr := client.completeWithToolChoice(ctx, messages, tools, toolChoice, allowed, temperature)
+	message, callErr := client.completeWithToolChoicePrepared(ctx, messages, tools, toolChoice, allowed, temperature)
 	reported := -1
 	if callErr == nil && message.CompletionTokensKnown {
 		reported = message.CompletionTokens

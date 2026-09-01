@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"akritas/internal/audit"
+	akritasinstructions "akritas/internal/instructions"
 	"akritas/internal/runbudget"
 )
 
@@ -21,6 +22,7 @@ func runOpsServer(arguments []string) {
 	modelID := flags.String("model", "akritas", "model ID exposed by this server")
 	upstreamAPIKeyEnvironment := flags.String("upstream-api-key-env", "OPENAI_API_KEY", "environment variable containing upstream API key")
 	apiKeyEnvironment := flags.String("api-key-env", "AKRITAS_API_KEY", "environment variable containing inbound Bearer API key")
+	systemInstructionsPath := flags.String("system-instructions", akritasinstructions.DefaultPath, "UTF-8 Markdown file with global model instructions")
 	responseLanguage := flags.String("response-language", defaultResponseLanguage, "BCP 47 language tag for model-generated prose; the Web UI remains English")
 	ragIndexPath := flags.String("rag-index", "", "local RAG index; empty disables RAG")
 	mcpConfigPath := flags.String("mcp-config", "", "MCP configuration; only authorized read tools are exposed")
@@ -52,6 +54,10 @@ func runOpsServer(arguments []string) {
 		panic("serve requires valid addresses, names and generation limits")
 	}
 	normalizedResponseLanguage, err := normalizeResponseLanguage(*responseLanguage)
+	if err != nil {
+		panic(err)
+	}
+	systemInstructions, err := akritasinstructions.Load(*systemInstructionsPath)
 	if err != nil {
 		panic(err)
 	}
@@ -145,6 +151,9 @@ func runOpsServer(arguments []string) {
 	if err != nil {
 		panic(err)
 	}
+	if err := client.SetSystemInstructions(systemInstructions); err != nil {
+		panic(err)
+	}
 	if err := client.DiscoverModel(ctx); err != nil {
 		panic(err)
 	}
@@ -190,8 +199,8 @@ func runOpsServer(arguments []string) {
 		IdleTimeout:       2 * time.Minute,
 	}
 	fmt.Printf(
-		"Akritas Web UI: http://%s model=%s upstream=%s response_language=%s tools=%d workspaces=%d approved_changes=true\n",
-		*address, *modelID, client.Model, normalizedResponseLanguage, len(registry.Definitions()), len(workspaces),
+		"Akritas Web UI: http://%s model=%s upstream=%s response_language=%s system_instructions=%s tools=%d workspaces=%d approved_changes=true\n",
+		*address, *modelID, client.Model, normalizedResponseLanguage, *systemInstructionsPath, len(registry.Definitions()), len(workspaces),
 	)
 	if ignoredMCPTools > 0 {
 		fmt.Printf("Ignored non-read MCP tools: %d\n", ignoredMCPTools)

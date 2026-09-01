@@ -38,6 +38,11 @@ Basic startup with a local `llama-server`:
 ```
 
 After startup, the Web UI is available at `http://127.0.0.1:8090/`.
+Akritas loads its global model behavior from `instructions/SYSTEM.md` before
+accepting requests. Use `-system-instructions /path/to/SYSTEM.md` to select an
+operator-managed file. Startup fails when the selected file is missing, empty,
+invalid UTF-8, or larger than 64 KiB.
+
 `-response-language` accepts a BCP 47 tag such as `ru`, `fr`, `ja`, or
 `pt-BR` and controls model-generated prose only. The Web UI remains English.
 

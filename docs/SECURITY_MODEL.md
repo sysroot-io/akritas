@@ -9,6 +9,7 @@ of truth for retrieval, tool execution, validation, approval, and writes.
 ## Trusted Computing Base
 
 The trusted computing base consists of the Akritas binary, its configuration,
+the operator-selected global system-instructions file,
 the operating-system account, explicitly configured validator executables, the
 reverse proxy or local network boundary, and the audit-storage directory.
 Upstream models, MCP servers, repository content, RAG documents, HTTP payloads,
@@ -33,6 +34,9 @@ and Alertmanager fields are untrusted.
    checks immediately before publication.
 9. Audit records persist lifecycle and security-relevant events without storing
    authorization headers or API keys.
+10. Global model instructions are loaded once from a bounded regular UTF-8 file
+    selected by the operator. They influence model behavior but cannot add tools,
+    grant permissions, raise budgets, or bypass host validation.
 
 ## Permission Model
 
@@ -77,6 +81,9 @@ workspace authorization is not implemented.
   written to server logs.
 - Audit storage is append-only from the application's perspective and must be
   protected by filesystem permissions and deployment backups.
+- The global system-instructions file is part of trusted configuration. Protect
+  it from unprivileged modification and restart Akritas after an intentional
+  change.
 
 ## Validator Boundary
 
@@ -89,6 +96,8 @@ for executable validators near production.
 ## Residual Risks
 
 - A compromised host account can modify workspaces and audit storage.
+- An actor who can modify the configured system-instructions file can change
+  model behavior, although host-side authorization and validation still apply.
 - Multi-file Apply uses best-effort rollback and is not crash-atomic.
 - In-memory approvals disappear after restart.
 - Authentication is instance-wide rather than per-user.

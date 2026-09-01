@@ -8,7 +8,7 @@ local HTTP service for people and integrations:
 ```text
 Web UI / Open WebUI / HTTP client
 → Akritas serve
-→ fixed safety SYSTEM prompt
+→ global instructions loaded from instructions/SYSTEM.md
 → automatic BM25 search over the connected local knowledge base
 → an OpenAI-compatible model through an external /v1 endpoint
 → authorized read-only MCP tools when needed
@@ -60,6 +60,34 @@ RAG, read-only MCP, and the test nftables workspace:
   -max-model-tokens 16384 \
   -request-timeout 10m
 ```
+
+## Global Model Instructions
+
+`serve` reads `instructions/SYSTEM.md` at startup and prepends its content to
+the first system message of every upstream model request. This includes normal
+chat, Alertmanager investigations, investigation planning, structured result
+generation, repository discovery, and change preparation. Task-specific
+instructions and the configured response-language rule follow the global file.
+
+Select another file with:
+
+```bash
+./bin/akritas serve \
+  -system-instructions /etc/akritas/SYSTEM.md \
+  -base-url http://127.0.0.1:8080/v1
+```
+
+The path is resolved from the process working directory when it is relative.
+The file must be a non-empty regular UTF-8 file no larger than 64 KiB. Akritas
+loads it once during startup; restart the process after editing it. Missing or
+invalid global instructions stop startup instead of falling back to rules
+embedded in the binary.
+
+The file controls model behavior only. It cannot add tools, authorize actions,
+change Run budgets, or weaken host-side validation. Protect an operator-managed
+copy with the same configuration-file permissions used for the service. The
+container image includes the default file at
+`/var/lib/akritas/instructions/SYSTEM.md`.
 
 ## Workspace Configuration and Shared Validators
 

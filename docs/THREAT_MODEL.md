@@ -36,7 +36,8 @@ Akritas host ---- OpenAI-compatible model (untrusted output)
 | Threat | Existing or required control | Residual risk |
 |---|---|---|
 | Unauthenticated API use | Loopback default, Bearer authentication, reverse proxy guidance | Instance-wide shared token |
-| Prompt injection from documents or alerts | Inputs labelled untrusted, fixed system prompts, runbook text grants no capability, host-side policy and execution evidence | Model can still select an irrelevant but authorized read-only query or give misleading advice |
+| Prompt injection from documents or alerts | Inputs labelled untrusted, operator-controlled global system instructions, runbook text grants no capability, host-side policy and execution evidence | Model can still select an irrelevant but authorized read-only query or give misleading advice |
+| System-instructions tampering | Operator-selected bounded regular file, deployment filesystem permissions, read-only container image, startup-time loading | An actor with configuration write access can alter model behavior; host capability checks still apply |
 | MCP privilege escalation | Explicit allowlist, pessimistic permissions, Web read-only filtering, host validation of every planned tool and argument | Authorized MCP process retains its OS permissions |
 | VictoriaMetrics scope escape | Operator-fixed URL, tenant headers, credentials, read-only endpoints, bounded responses | MetricsQL may still select every series visible to the configured VictoriaMetrics identity |
 | Arbitrary file read | Fixed RAG index, canonical workspace paths, traversal and symlink checks | Authorized workspace files remain visible to change preparation |
@@ -60,6 +61,7 @@ operation. Test names should describe the threat they enforce.
 
 ## Review Triggers
 
-Revisit this threat model whenever Akritas adds write-capable tools, per-user
+Revisit this threat model whenever Akritas changes global-instruction loading,
+adds write-capable tools, per-user
 authorization, remote workspaces, new validator profiles, network-accessible MCP
 transports, signed audit records, or multi-node deployment.

@@ -157,6 +157,49 @@ func TestOpenAIClientNegotiatesAndCachesTokenLimitParameter(t *testing.T) {
 	}
 }
 
+func TestOpenAIClientPrependsConfiguredSystemInstructions(t *testing.T) {
+	var received []openAIToolMessage
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var input openAIToolRequest
+		if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		received = input.Messages
+		writeTestJSON(writer, http.StatusOK, map[string]any{
+			"choices": []any{map[string]any{"message": map[string]any{
+				"role": "assistant", "content": "ok",
+			}}},
+		})
+	}))
+	defer server.Close()
+
+	client, err := newOpenAIToolClient(server.URL+"/v1", "test-model", "", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.SetSystemInstructions("global instructions"); err != nil {
+		t.Fatal(err)
+	}
+	task, user := "task instructions", "request"
+	messages := []openAIToolMessage{
+		{Role: "system", Content: &task},
+		{Role: "user", Content: &user},
+	}
+	if _, err := client.complete(context.Background(), messages, nil, 64, 0); err != nil {
+		t.Fatal(err)
+	}
+	if len(received) != 2 || received[0].Role != "system" || received[0].Content == nil {
+		t.Fatalf("unexpected messages: %+v", received)
+	}
+	want := "global instructions\n\ntask instructions"
+	if *received[0].Content != want {
+		t.Fatalf("system message = %q, want %q", *received[0].Content, want)
+	}
+	if messages[0].Content == nil || *messages[0].Content != task {
+		t.Fatalf("caller messages were mutated: %+v", messages)
+	}
+}
+
 func TestOpenAIClientDoesNotRetryUnrelatedBadRequest(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
