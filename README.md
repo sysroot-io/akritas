@@ -3,6 +3,7 @@
 [![CI and Security](https://github.com/sysroot-io/Akritas/actions/workflows/ci.yml/badge.svg)](https://github.com/sysroot-io/Akritas/actions/workflows/ci.yml)
 [![Documentation](https://img.shields.io/badge/docs-akritas.sysroot.io-2563eb)](https://akritas.sysroot.io/)
 [![Go 1.25+](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 Akritas is a standalone host for LLM-powered operational automation. It accepts
 requests from people and Alertmanager, searches local context, invokes authorized
@@ -136,6 +137,10 @@ links to the security and threat models.
 
 Both demos use the regular binary and HTTP interfaces; neither bypasses host
 policy or validation.
+
+## License
+
+Akritas is licensed under the [Apache License 2.0](LICENSE).
 
 ## Container Deployment
 
