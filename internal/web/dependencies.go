@@ -34,9 +34,11 @@ func runOpenAIToolLoop(
 	maxCalls, maxTokens int,
 	temperature float64,
 	tracker *runbudget.Tracker,
+	observeToolResult func([]openAIToolMessage, ToolCall, ToolResult) ([]openAIToolMessage, error),
 ) (openAIToolLoopResult, error) {
-	return openai.RunToolLoopBudgeted(
+	return openai.RunToolLoopBudgetedObserved(
 		ctx, client, history, registry, policy, maxCalls, maxTokens, temperature, tracker,
+		observeToolResult,
 	)
 }
 

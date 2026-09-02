@@ -9,7 +9,7 @@ of truth for retrieval, tool execution, validation, approval, and writes.
 ## Trusted Computing Base
 
 The trusted computing base consists of the Akritas binary, its configuration,
-the operator-selected global system-instructions file,
+the operator-selected global system-instructions file and operational skills,
 the operating-system account, explicitly configured validator executables, the
 reverse proxy or local network boundary, and the audit-storage directory.
 Upstream models, MCP servers, repository content, RAG documents, HTTP payloads,
@@ -37,6 +37,14 @@ and Alertmanager fields are untrusted.
 10. Global model instructions are loaded once from a bounded regular UTF-8 file
     selected by the operator. They influence model behavior but cannot add tools,
     grant permissions, raise budgets, or bypass host validation.
+11. Operational skills are loaded from a bounded catalog. The host can select
+    exact matches from explicit fields or successful inventory/CMDB results.
+    When those sources are insufficient, read-only knowledge tools expose only
+    bounded metadata and load one exact catalog name. Automatic and requested
+    loads share an eight-skill cap and do not change tool policy.
+12. The optional service configuration uses a versioned strict JSON schema with
+    bounded input. It contains credential variable names, not secret values;
+    actual keys remain in the process environment.
 
 ## Permission Model
 
@@ -84,6 +92,9 @@ workspace authorization is not implemented.
 - The global system-instructions file is part of trusted configuration. Protect
   it from unprivileged modification and restart Akritas after an intentional
   change.
+- Skill files are trusted configuration. A malicious skill can misguide model
+  reasoning, but cannot add tools or bypass host-side authorization, argument
+  validation, budgets, and audit controls.
 
 ## Validator Boundary
 
@@ -98,6 +109,12 @@ for executable validators near production.
 - A compromised host account can modify workspaces and audit storage.
 - An actor who can modify the configured system-instructions file can change
   model behavior, although host-side authorization and validation still apply.
+- A misleading selector in a successful inventory result can load an irrelevant
+  trusted skill and degrade the investigation. Exact matching and the per-Run
+  selection cap bound the additional context but do not prove inventory truth.
+- A model can request a relevant-looking but incorrect skill after listing
+  catalog metadata. Exact-name lookup, the shared selection cap, and the rule
+  that loading is not evidence limit impact but cannot prevent degraded advice.
 - Multi-file Apply uses best-effort rollback and is not crash-atomic.
 - In-memory approvals disappear after restart.
 - Authentication is instance-wide rather than per-user.

@@ -16,9 +16,13 @@ RUN apt-get update \
 
 COPY --from=build /out/akritas /usr/local/bin/akritas
 COPY --chown=akritas:akritas instructions /var/lib/akritas/instructions
+COPY --chown=akritas:akritas skills /var/lib/akritas/skills
+COPY --chown=akritas:akritas configs/akritas/server.container.json /var/lib/akritas/configs/server.json
+
+ENV AKRITAS_CONFIG=/var/lib/akritas/configs/server.json
 
 USER akritas
 WORKDIR /var/lib/akritas
 EXPOSE 8090
 ENTRYPOINT ["/usr/local/bin/akritas"]
-CMD ["serve", "-address", "0.0.0.0:8090", "-audit-log", "/var/lib/akritas/audit/akritas.jsonl"]
+CMD ["serve"]

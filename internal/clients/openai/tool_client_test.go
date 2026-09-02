@@ -62,6 +62,9 @@ func TestOpenAIToolLoopDiscoversModelAndExecutesAuthorizedTool(t *testing.T) {
 				last.Content == nil || !strings.Contains(*last.Content, `"hello"`) {
 				t.Errorf("tool continuation=%+v", last)
 			}
+			if input.Messages[0].Content == nil || !strings.Contains(*input.Messages[0].Content, "Observed tool result.") {
+				t.Errorf("tool-result observer did not update history: %+v", input.Messages)
+			}
 			writeTestJSON(writer, http.StatusOK, map[string]any{
 				"choices": []any{map[string]any{"message": map[string]any{
 					"role": "assistant", "content": "Echo says hello.",
@@ -82,10 +85,20 @@ func TestOpenAIToolLoopDiscoversModelAndExecutesAuthorizedTool(t *testing.T) {
 	}
 	system := "Use tools."
 	user := "Echo hello."
+	observed := false
 	result, err := runOpenAIToolLoop(
 		context.Background(), client,
 		[]openAIToolMessage{{Role: "system", Content: &system}, {Role: "user", Content: &user}},
 		registry, policy, 2, 64, 0, nil,
+		func(history []openAIToolMessage, call mcp.ToolCall, result mcp.ToolResult) ([]openAIToolMessage, error) {
+			observed = true
+			if call.Name != "local.echo" || result.Error != nil {
+				t.Fatalf("unexpected observed result: call=%+v result=%+v", call, result)
+			}
+			updated := "Use tools. Observed tool result."
+			history[0].Content = &updated
+			return history, nil
+		},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -98,6 +111,9 @@ func TestOpenAIToolLoopDiscoversModelAndExecutesAuthorizedTool(t *testing.T) {
 	}
 	if requests != 2 {
 		t.Fatalf("chat requests=%d, want 2", requests)
+	}
+	if !observed {
+		t.Fatal("tool-result observer was not called")
 	}
 }
 

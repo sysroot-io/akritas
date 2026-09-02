@@ -23,32 +23,35 @@ curl --fail http://127.0.0.1:8090/health
 The container filesystem is read-only, all Linux capabilities are dropped, and
 privilege escalation is disabled. Only `/tmp` and the named audit volume are
 writable. The image includes the Go toolchain so configured Go validators can
-run inside an explicitly mounted workspace.
+run inside an explicitly mounted workspace. Its built-in
+`/var/lib/akritas/configs/server.json` selects the container-safe listen
+address, host upstream URL, and audit path; `AKRITAS_CONFIG` can select a
+mounted replacement.
 
 ## Add RAG and Workspaces
 
-Extend the `command` and `volumes` sections in a local Compose override:
+The included Compose service runs only `akritas serve`; settings come from
+`.env`. For a larger deployment, mount a service configuration and its inputs
+through a local Compose override:
 
 ```yaml
 services:
   akritas:
-    command:
-      - serve
-      - -address
-      - 0.0.0.0:8090
-      - -base-url
-      - http://host.docker.internal:8080/v1
-      - -rag-index
-      - /var/lib/akritas/indexes/operations.tgr
-      - -workspace-config
-      - /etc/akritas/workspaces.json
-      - -audit-log
-      - /var/lib/akritas/audit/akritas.jsonl
+    environment:
+      AKRITAS_CONFIG: /etc/akritas/server.json
     volumes:
+      - ./configs/akritas/server.local.json:/etc/akritas/server.json:ro
       - ./data/indexes:/var/lib/akritas/indexes:ro
       - ./configs/akritas/workspaces.local.json:/etc/akritas/workspaces.json:ro
       - /srv/repos/backend:/workspaces/backend:rw
 ```
+
+The mounted `server.local.json` should keep `address` at `0.0.0.0:8090` and can
+set `rag_index` to `/var/lib/akritas/indexes/operations.tgr`,
+`workspace_config` to `/etc/akritas/workspaces.json`, and `audit_log` to
+`/var/lib/akritas/audit/akritas.jsonl`. Start from
+`configs/akritas/server.example.json`. Environment variables can override any
+field and explicit CLI flags remain the highest-precedence option.
 
 Container workspace roots in the catalog must use their mounted paths, such as
 `/workspaces/backend`. Use `:ro` for diagnostic-only workspaces. Change apply
@@ -66,4 +69,3 @@ Upgrade with `docker compose build --pull` followed by
 `docker compose up -d`. Stop without deleting audit data with
 `docker compose down`. Do not use `docker compose down -v` unless permanent
 audit deletion is intentional and covered by retention policy.
-

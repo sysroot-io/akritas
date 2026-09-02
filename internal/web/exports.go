@@ -9,6 +9,7 @@ import (
 	"akritas/internal/clients/openai"
 	"akritas/internal/mcp"
 	"akritas/internal/runbudget"
+	"akritas/internal/skills"
 )
 
 type Server = opsServer
@@ -39,6 +40,10 @@ func (server *opsServer) SetValidatorProfiles(profiles []string) {
 
 func (server *opsServer) SetAuditStore(store *audit.Store) {
 	server.auditStore = store
+}
+
+func (server *opsServer) SetSkillCatalog(catalog *skills.Catalog) {
+	server.skillCatalog = catalog
 }
 
 func (server *opsServer) SetRunBudget(limits runbudget.Limits) error {
@@ -77,4 +82,10 @@ func RegisterInvestigationPlanTool(registry *mcp.ToolRegistry) error {
 	return registerOpsInvestigationPlanTool(registry)
 }
 
+func RegisterKnowledgeSkillTools(registry *mcp.ToolRegistry, catalog *skills.Catalog) error {
+	return registerOpsKnowledgeSkillTools(registry, catalog)
+}
+
 const InvestigationPlanToolName = localInvestigationPlanToolName
+const KnowledgeListSkillsToolName = localKnowledgeListSkillsName
+const KnowledgeLoadSkillToolName = localKnowledgeLoadSkillName

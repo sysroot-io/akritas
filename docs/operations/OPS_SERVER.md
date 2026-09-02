@@ -61,6 +61,76 @@ RAG, read-only MCP, and the test nftables workspace:
   -request-timeout 10m
 ```
 
+## Service Configuration
+
+Every `serve` flag can be configured through a versioned JSON file or an
+environment variable. Resolution is deterministic, from highest to lowest
+precedence:
+
+1. command-line flag;
+2. `AKRITAS_*` environment variable;
+3. strict JSON service configuration;
+4. built-in default.
+
+Copy the complete example and select it with either the flag or environment:
+
+```bash
+cp configs/akritas/server.example.json \
+  configs/akritas/server.local.json
+./bin/akritas serve -config configs/akritas/server.local.json
+
+# Equivalent service/container selection:
+AKRITAS_CONFIG=/etc/akritas/server.json ./bin/akritas serve
+```
+
+`-config` overrides `AKRITAS_CONFIG`. The JSON decoder rejects unknown fields,
+trailing values, unsupported versions, non-regular files, and files larger
+than 1 MiB. Relative paths in the service configuration retain normal `serve`
+semantics and are resolved from the process working directory; workspace roots
+inside the separate workspace catalog remain relative to that catalog file.
+
+| JSON key | Environment variable | CLI flag |
+|---|---|---|
+| `address` | `AKRITAS_ADDRESS` | `-address` |
+| `base_url` | `AKRITAS_BASE_URL` | `-base-url` |
+| `upstream_model` | `AKRITAS_UPSTREAM_MODEL` | `-upstream-model` |
+| `model` | `AKRITAS_MODEL` | `-model` |
+| `upstream_api_key_env` | `AKRITAS_UPSTREAM_API_KEY_ENV` | `-upstream-api-key-env` |
+| `api_key_env` | `AKRITAS_API_KEY_ENV` | `-api-key-env` |
+| `system_instructions` | `AKRITAS_SYSTEM_INSTRUCTIONS` | `-system-instructions` |
+| `skills_dir` | `AKRITAS_SKILLS_DIR` | `-skills-dir` |
+| `response_language` | `AKRITAS_RESPONSE_LANGUAGE` | `-response-language` |
+| `rag_index` | `AKRITAS_RAG_INDEX` | `-rag-index` |
+| `mcp_config` | `AKRITAS_MCP_CONFIG` | `-mcp-config` |
+| `workspace_config` | `AKRITAS_WORKSPACE_CONFIG` | `-workspace-config` |
+| `audit_log` | `AKRITAS_AUDIT_LOG` | `-audit-log` |
+| `search_top_k` | `AKRITAS_SEARCH_TOP_K` | `-search-top-k` |
+| `result_runes` | `AKRITAS_RESULT_RUNES` | `-result-runes` |
+| `max_tokens` | `AKRITAS_MAX_TOKENS` | `-max-tokens` |
+| `max_tokens_limit` | `AKRITAS_MAX_TOKENS_LIMIT` | `-max-tokens-limit` |
+| `max_tool_calls` | `AKRITAS_MAX_TOOL_CALLS` | `-max-tool-calls` |
+| `max_iterations` | `AKRITAS_MAX_ITERATIONS` | `-max-iterations` |
+| `max_tool_result_bytes` | `AKRITAS_MAX_TOOL_RESULT_BYTES` | `-max-tool-result-bytes` |
+| `max_retrieved_context_bytes` | `AKRITAS_MAX_RETRIEVED_CONTEXT_BYTES` | `-max-retrieved-context-bytes` |
+| `max_context_tokens` | `AKRITAS_MAX_CONTEXT_TOKENS` | `-max-context-tokens` |
+| `max_model_tokens` | `AKRITAS_MAX_MODEL_TOKENS` | `-max-model-tokens` |
+| `temperature` | `AKRITAS_TEMPERATURE` | `-temperature` |
+| `request_timeout` | `AKRITAS_REQUEST_TIMEOUT` | `-request-timeout` |
+| `workspaces` | `AKRITAS_WORKSPACES` | repeatable `-workspace` |
+| `change_validators` | `AKRITAS_CHANGE_VALIDATORS` | repeatable `-change-validator` |
+
+Duration values use Go duration syntax, such as `30s` or `10m`. List-valued
+environment variables accept either comma-separated values or a JSON string
+array. When a repeatable CLI flag is supplied for the first time, it replaces
+the configured list; subsequent occurrences append to that CLI list.
+
+The legacy `AKRITAS_UPSTREAM_BASE_URL` name remains accepted for compatibility,
+but `AKRITAS_BASE_URL` takes precedence when both are set.
+
+Do not place API tokens in the JSON file. `upstream_api_key_env` and
+`api_key_env` contain environment-variable names; the actual default secrets
+remain `OPENAI_API_KEY` and `AKRITAS_API_KEY`.
+
 ## Global Model Instructions
 
 `serve` reads `instructions/SYSTEM.md` at startup and prepends its content to
@@ -88,6 +158,81 @@ change Run budgets, or weaken host-side validation. Protect an operator-managed
 copy with the same configuration-file permissions used for the service. The
 container image includes the default file at
 `/var/lib/akritas/instructions/SYSTEM.md`.
+
+## Selective Operational Skills
+
+`serve` loads an operator-controlled skill catalog from `skills` by default.
+Select another directory with `-skills-dir <path>`, or use an empty value to
+disable skills. Each immediate child directory is one skill:
+
+```text
+skills/
+  postgresql/
+    SKILL.md
+  redis/
+    SKILL.md
+```
+
+A skill without front matter uses its directory name as its only exact match
+selector. Optional YAML-style front matter can add aliases:
+
+```markdown
+---
+name: postgresql
+description: Read-only PostgreSQL investigation guidance.
+match:
+  - postgres
+  - postgresql
+---
+# PostgreSQL Investigation Skill
+
+Check active queries, autovacuum workers, and waits when the corresponding
+authorized tools are available.
+```
+
+`name` must equal the directory name. Skill names and selectors use lower-case
+letters, digits, dots, underscores, and hyphens. The catalog accepts at most 128
+skills, each file is limited to 64 KiB, total catalog input is limited to 512
+KiB, each listable description is limited to 512 bytes, and no more than eight
+skills are selected for one Run.
+
+Automatic selection is host-owned and exact. Before investigation planning,
+Akritas looks only at explicit `role`, `service`, `technology`, `component`,
+`database`, `db`, `engine`, or `platform` fields in the latest request. After the initial
+host-validated checks, it also extracts those fields from successful tools whose
+names identify them as inventory or CMDB tools. Failed tool results do not
+automatically select skills. Free-form mentions and retrieved RAG documents do
+not trigger automatic selection.
+
+When explicit facts are absent or an inventory/CMDB check is unavailable,
+fails, or returns insufficient data, two host-owned read-only tools provide a
+bounded fallback:
+
+- `knowledge.list_skills` returns only skill names and short descriptions;
+- `knowledge.load_skill` accepts one exact name returned by the catalog and
+  adds that skill's trusted instructions to the current Run system context.
+
+The planner can schedule these tools and they remain available to the adaptive
+tool loop after an inventory failure. Every call consumes the normal Run tool
+budget. Automatic and model-requested selections share the maximum of eight
+skills per Run. Aliases are valid for automatic matching but cannot be passed
+to `knowledge.load_skill`; this prevents a free-form lookup from resolving to
+multiple files. Loading guidance is not evidence that the named technology is
+actually installed or affected.
+
+Selected skill content is appended to the host-owned system context before the
+next model request. This lets an inventory result such as `role: postgresql`
+load only `postgresql/SKILL.md` before the adaptive tool loop. The loop still
+receives the normal authorized read-only tool schemas, so the skill can guide
+the model toward available PostgreSQL checks without creating a capability.
+The native chat and Alertmanager responses report selected names in `skills`,
+and the Web Run log displays them.
+
+Skill files are trusted operator configuration and are loaded once at startup.
+Restart Akritas after editing them. A skill affects reasoning only: MCP policy,
+argument validation, tool timeouts, Run budgets, and write restrictions remain
+host-enforced. The knowledge tools are registered only when the skill catalog is
+enabled.
 
 ## Workspace Configuration and Shared Validators
 

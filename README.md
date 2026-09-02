@@ -37,11 +37,27 @@ Basic startup with a local `llama-server`:
   -response-language en
 ```
 
+Every `serve` option can also be supplied through a strict JSON configuration
+or an `AKRITAS_*` environment variable. Precedence is command-line flag,
+environment, JSON configuration, then built-in default. Start from
+`configs/akritas/server.example.json` and select it with `-config` or
+`AKRITAS_CONFIG`; secrets remain in the environment variables named by
+`upstream_api_key_env` and `api_key_env`.
+
 After startup, the Web UI is available at `http://127.0.0.1:8090/`.
 Akritas loads its global model behavior from `instructions/SYSTEM.md` before
 accepting requests. Use `-system-instructions /path/to/SYSTEM.md` to select an
 operator-managed file. Startup fails when the selected file is missing, empty,
 invalid UTF-8, or larger than 64 KiB.
+
+Operational skills live under `skills/<name>/SKILL.md`. `serve` loads the
+catalog from `-skills-dir` (default `skills`). It automatically selects exact
+matches from explicit `role`, `service`, `technology`, `component`, `database`,
+`engine`, or `platform` fields and successful inventory/CMDB results. When that
+evidence is unavailable or inconclusive, the model can list bounded metadata
+with `knowledge.list_skills` and load one exact name with
+`knowledge.load_skill`. Loaded guidance never adds a tool, authorizes an action,
+or proves that a technology is present. Set `-skills-dir ''` to disable skills.
 
 `-response-language` accepts a BCP 47 tag such as `ru`, `fr`, `ja`, or
 `pt-BR` and controls model-generated prose only. The Web UI remains English.

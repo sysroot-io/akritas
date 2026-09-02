@@ -123,6 +123,7 @@ func TestOpsWebIncludesToolCatalogAndUnambiguousRunLog(t *testing.T) {
 		"Run log",
 		"Investigation plan",
 		"Unavailable checks",
+		"Selected skills",
 		"item.duration_ms",
 	} {
 		if !strings.Contains(content, expected) {

@@ -334,7 +334,7 @@
       if (role === 'assistant') renderMarkdown(text, content); else text.textContent = content;
       box.append(label, text); byId('messages').append(box); byId('messages').scrollTop = byId('messages').scrollHeight;
     }
-    function renderActivity(items, gaps, debug, budget, runID = '', requestError = '') {
+    function renderActivity(items, gaps, skills, debug, budget, runID = '', requestError = '') {
       const root = byId('activity'); root.replaceChildren();
       const title = value => { const node = document.createElement('div'); node.className = 'activity-title'; node.textContent = value; root.append(node); };
       const addItem = (text, className = '') => { const node = document.createElement('div'); node.className = `activity-item ${className}`.trim(); node.textContent = text; root.append(node); };
@@ -345,6 +345,10 @@
       if (requestError) addItem(`Request failed: ${requestError}`, 'failed');
       if (plans.length && !(gaps || []).length) addItem('Investigation plan · ok · No unavailable checks.', 'ok');
       if (!plans.length && !requestError) addItem('The investigation plan was not produced.');
+      if ((skills || []).length) {
+        title('Selected skills');
+        for (const skill of skills) addItem(skill, 'ok');
+      }
       title('Executed tools');
       if (!executed.length) addItem('No diagnostic tools were called.');
       for (const item of executed) {
@@ -383,12 +387,12 @@
       const button = byId('send-chat'); setBusy(button, true);
       try {
         const result = await api('/api/v1/chat', { method: 'POST', body: JSON.stringify({ messages: state.messages, debug: byId('debug').checked }) });
-        state.messages.push({ role: 'assistant', content: result.answer }); renderMessage('assistant', result.answer); renderActivity(result.activity, result.capability_gaps, byId('debug').checked, result.budget, result.run_id || '');
+        state.messages.push({ role: 'assistant', content: result.answer }); renderMessage('assistant', result.answer); renderActivity(result.activity, result.capability_gaps, result.skills, byId('debug').checked, result.budget, result.run_id || '');
       } catch (error) {
         state.messages.pop();
         input.value = value;
         renderMessage('assistant', `Error: ${error.message}`);
-        renderActivity([], [], false, null, '', error.message);
+        renderActivity([], [], [], false, null, '', error.message);
       }
       finally { setBusy(button, false); }
     }

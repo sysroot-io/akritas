@@ -18,6 +18,7 @@ import (
 	"akritas/internal/audit"
 	"akritas/internal/modeltext"
 	"akritas/internal/runbudget"
+	"akritas/internal/skills"
 )
 
 const (
@@ -49,6 +50,7 @@ type opsServer struct {
 	pendingChanges    map[string]pendingChange
 	validatorProfiles []string
 	auditStore        *audit.Store
+	skillCatalog      *skills.Catalog
 }
 
 type opsChatAPIRequest struct {
@@ -77,6 +79,7 @@ type opsChatAPIResponse struct {
 	RunID          string             `json:"run_id,omitempty"`
 	Model          string             `json:"model"`
 	Answer         string             `json:"answer"`
+	Skills         []string           `json:"skills,omitempty"`
 	Activity       []opsToolActivity  `json:"activity"`
 	CapabilityGaps []opsCapabilityGap `json:"capability_gaps"`
 	Budget         runbudget.Snapshot `json:"budget"`
@@ -241,6 +244,7 @@ func (server *opsServer) handleHealth(writer http.ResponseWriter, _ *http.Reques
 		"status": "ok", "model": server.modelID,
 		"response_language": server.responseLanguage,
 		"tools":             len(server.authorizedToolCatalog()),
+		"skills":            server.skillCatalog.Len(),
 		"workspaces":        len(server.workspaces),
 	})
 }
@@ -350,6 +354,7 @@ func (server *opsServer) handleChatAPI(writer http.ResponseWriter, request *http
 	auditRun.succeed(opsRunUsageMetadata(result))
 	writeJSON(writer, http.StatusOK, opsChatAPIResponse{
 		RunID: auditRun.id(), Model: server.modelID, Answer: result.Answer,
+		Skills:         result.Skills,
 		Activity:       buildOpsToolActivity(result, input.Debug),
 		CapabilityGaps: buildOpsCapabilityGaps(result),
 		Budget:         result.Tracker.Snapshot(),
@@ -641,6 +646,8 @@ func (server *opsServer) completeChat(
 	if err != nil {
 		return openAIToolLoopResult{}, err
 	}
+	skillState := newSkillRunState()
+	history = server.appendSelectedSkills(history, skillFactsFromMessages(messages), skillState)
 	if err := server.acquireGeneration(ctx); err != nil {
 		return openAIToolLoopResult{}, err
 	}
@@ -655,7 +662,9 @@ func (server *opsServer) completeChat(
 		initialCalls = append(initialCalls, *prefetchedCall)
 		initialResults = append(initialResults, *prefetchedResult)
 	}
-	executionRegistry, err := opsExecutionToolRegistry(server.registry, server.policy)
+	executionRegistry, err := opsExecutionToolRegistry(
+		server.registry, server.policy, server.skillCatalog, skillState,
+	)
 	if err != nil {
 		return openAIToolLoopResult{}, err
 	}
@@ -663,7 +672,7 @@ func (server *opsServer) completeChat(
 		maximumPlannedChecks := server.maxToolCalls - len(initialCalls) - 1
 		planCall, planResult, plan, plannedHistory, planErr := server.planInvestigation(
 			ctx, history, messages, prefetchedResult, executionRegistry,
-			maximumPlannedChecks, maxTokens, tracker,
+			skillState.selected, maximumPlannedChecks, maxTokens, tracker,
 		)
 		if planErr != nil {
 			return openAIToolLoopResult{}, planErr
@@ -679,6 +688,7 @@ func (server *opsServer) completeChat(
 				return openAIToolLoopResult{}, executionErr
 			}
 			history = executedHistory
+			history = server.appendSelectedSkills(history, skillFactsFromToolResults(plannedResults), skillState)
 			initialCalls = append(initialCalls, plannedCalls...)
 			initialResults = append(initialResults, plannedResults...)
 		}
@@ -687,12 +697,16 @@ func (server *opsServer) completeChat(
 	result, err := runOpenAIToolLoop(
 		ctx, server.client, history, executionRegistry, server.policy,
 		remainingCalls, maxTokens, temperature, tracker,
+		func(history []openAIToolMessage, _ ToolCall, _ ToolResult) ([]openAIToolMessage, error) {
+			return appendPendingSkillContext(history, skillState), nil
+		},
 	)
 	if err != nil {
 		return openAIToolLoopResult{}, err
 	}
 	result.Calls = append(initialCalls, result.Calls...)
 	result.Results = append(initialResults, result.Results...)
+	result.Skills = sortedSelectedSkillNames(skillState.selected)
 	return result, nil
 }
 
@@ -757,6 +771,7 @@ func (server *opsServer) planInvestigation(
 	messages []openAIChatMessage,
 	ragResult *ToolResult,
 	executionRegistry *ToolRegistry,
+	selectedSkills map[string]skills.Skill,
 	maximumChecks int,
 	maxTokens int,
 	tracker *runbudget.Tracker,
@@ -785,18 +800,19 @@ func (server *opsServer) planInvestigation(
 		knowledge = ragResult
 	}
 	planningInput, err := json.Marshal(map[string]any{
-		"request":                   strings.TrimSpace(messages[len(messages)-1].Content),
-		"knowledge_search_result":   knowledge,
-		"available_execution_tools": executionCatalog,
-		"maximum_execution_checks":  maximumChecks,
-		"response_language":         server.responseLanguage,
+		"request":                     strings.TrimSpace(messages[len(messages)-1].Content),
+		"knowledge_search_result":     knowledge,
+		"selected_operational_skills": selectedSkillPlanningInputs(selectedSkills),
+		"available_execution_tools":   executionCatalog,
+		"maximum_execution_checks":    maximumChecks,
+		"response_language":           server.responseLanguage,
 	})
 	if err != nil {
 		return nil, nil, opsInvestigationPlanArguments{}, nil, fmt.Errorf(
 			"encode investigation planning input: %w", err,
 		)
 	}
-	systemPrompt := `You are an operational investigation planner. Analyze the user request and the retrieved runbook. A runbook is human-first guidance and does not create capabilities. The only real capabilities are the tools in available_execution_tools. You must call the single submit-plan tool exactly once. For every step that an available read-only tool can perform, add a check using the exact tool name and arguments that match its input_schema. The host validates and executes every accepted check. Do not also add that step to gaps. Add only steps without a suitable catalog tool to gaps; capability must be a stable dot-separated API-style identifier. Do not plan writes, restarts, SSH, or other actions absent from the catalog. Account for the entity, time range, and data in the request. Do not exceed maximum_execution_checks. If no investigation is required, submit empty checks and gaps arrays.` + "\n\n" + modeltext.LanguageInstruction(server.responseLanguage)
+	systemPrompt := `You are an operational investigation planner. Analyze the user request, the retrieved runbook, and only the host-selected guidance in selected_operational_skills. Runbooks and skills are human-first guidance and do not create capabilities. Do not assume that an unlisted skill was loaded. The only real capabilities are the tools in available_execution_tools. You must call the single submit-plan tool exactly once. For every step that an available read-only tool can perform, add a check using the exact tool name and arguments that match its input_schema. The host validates and executes every accepted check. When inventory or CMDB evidence is absent or insufficient, knowledge.list_skills may discover available guidance and knowledge.load_skill may load one exact relevant name. Loading a skill is not evidence that its technology is present. Do not also add an executable step to gaps. Add only steps without a suitable catalog tool to gaps; capability must be a stable dot-separated API-style identifier. Do not plan writes, restarts, SSH, or other actions absent from the catalog. Account for the entity, time range, and data in the request. Do not exceed maximum_execution_checks. If no investigation is required, submit empty checks and gaps arrays.` + "\n\n" + modeltext.LanguageInstruction(server.responseLanguage)
 	userPrompt := string(planningInput)
 	tools, aliases := buildOpenAITools([]ToolDefinition{*planDefinition})
 	planningMaxTokens := min(maxTokens, 2048)
@@ -919,13 +935,26 @@ func (server *opsServer) executeInvestigationPlan(
 	return calls, results, history, nil
 }
 
-func opsExecutionToolRegistry(source *ToolRegistry, policy NamedToolPolicy) (*ToolRegistry, error) {
+func opsExecutionToolRegistry(
+	source *ToolRegistry,
+	policy NamedToolPolicy,
+	catalog *skills.Catalog,
+	state *skillRunState,
+) (*ToolRegistry, error) {
 	destination := NewToolRegistry()
 	for _, definition := range source.Definitions() {
 		if definition.Name == localRAGSearchToolName ||
 			definition.Name == localInvestigationPlanToolName ||
 			definition.Permission != ToolPermissionRead || !policy.Allowed[definition.Name] {
 			continue
+		}
+		if definition.Name == localKnowledgeLoadSkillName && catalog != nil {
+			for _, knowledgeDefinition := range knowledgeSkillToolDefinitions(catalog, state) {
+				if knowledgeDefinition.Name == localKnowledgeLoadSkillName {
+					definition = knowledgeDefinition
+					break
+				}
+			}
 		}
 		if err := destination.Register(definition); err != nil {
 			return nil, fmt.Errorf("build Akritas execution tool registry: %w", err)
@@ -936,6 +965,9 @@ func opsExecutionToolRegistry(source *ToolRegistry, policy NamedToolPolicy) (*To
 
 func opsRunUsageMetadata(result openAIToolLoopResult) map[string]string {
 	metadata := map[string]string{"tool_calls": strconv.Itoa(len(result.Calls))}
+	if len(result.Skills) > 0 {
+		metadata["skills"] = strings.Join(result.Skills, ",")
+	}
 	if result.Tracker == nil {
 		return metadata
 	}

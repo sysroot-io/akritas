@@ -29,9 +29,27 @@ prompts remain coupled to their schemas and host-side implementations and
 follow the global instructions. The file affects model behavior but does not
 grant capabilities or alter host authorization.
 
+Operational `SKILL.md` files form a separate bounded catalog. The host matches
+skills against explicit request fields and successful inventory or CMDB facts.
+Matched content is added to the system context before planning or adaptive
+follow-up. If those facts are absent or insufficient, the read-only internal
+tools `knowledge.list_skills` and `knowledge.load_skill` let the model inspect
+bounded name/description metadata and load one exact catalog entry. Every load
+counts against the Run tool budget and the shared eight-skill cap. Skill
+selection does not change the authorized tool catalog. A skill can guide use of
+an already available tool but cannot register or authorize one, and loading it
+is not evidence that its technology is present.
+
 The upstream model remains outside the project boundary. Akritas can use
 `llama-server`, OpenRouter, or another OpenAI-compatible service without
 depending on model-specific Go packages, checkpoints, or tokenizer formats.
+
+The `serve` adapter assembles runtime settings through one versioned
+configuration layer. Command-line flags override `AKRITAS_*` environment
+variables, which override the strict JSON service configuration, which
+overrides built-in defaults. The service configuration selects paths and the
+names of credential variables; credential values stay in the process
+environment and are not fields in the JSON schema.
 
 ## Stable Replacement Ports
 
@@ -55,6 +73,7 @@ internal/web/                 HTTP API, Web UI, and OpenAI-compatible facade
 internal/web/ops_web/         embedded Web UI static assets
 internal/corpus/              corpus storage, import, and quality control
 internal/rag/                 index construction, search, and the RAG tool
+internal/skills/              bounded SKILL.md catalog and exact matching
 internal/mcp/                 tool registry, transport, and MCP host
 internal/victoriametrics/     bounded read-only VictoriaMetrics MCP tools
 internal/change/              discovery, proposal, validators, and approval

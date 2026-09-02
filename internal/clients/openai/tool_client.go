@@ -109,6 +109,7 @@ type openAIToolLoopResult struct {
 	Calls   []mcp.ToolCall
 	Results []mcp.ToolResult
 	History []openAIToolMessage
+	Skills  []string
 	Tracker *runbudget.Tracker
 }
 
@@ -473,6 +474,7 @@ func runOpenAIToolLoop(
 	maxTokens int,
 	temperature float64,
 	tracker *runbudget.Tracker,
+	observeToolResult func([]openAIToolMessage, mcp.ToolCall, mcp.ToolResult) ([]openAIToolMessage, error),
 ) (openAIToolLoopResult, error) {
 	if client == nil || registry == nil || policy == nil {
 		return openAIToolLoopResult{}, fmt.Errorf("OpenAI tool loop requires client, registry and policy")
@@ -545,6 +547,12 @@ func runOpenAIToolLoop(
 			})
 			result.Calls = append(result.Calls, call)
 			result.Results = append(result.Results, toolResult)
+			if observeToolResult != nil {
+				result.History, err = observeToolResult(result.History, call, toolResult)
+				if err != nil {
+					return openAIToolLoopResult{}, fmt.Errorf("observe tool result %q: %w", call.Name, err)
+				}
+			}
 		}
 	}
 }
@@ -584,7 +592,7 @@ func RunToolLoop(
 	maxTokens int,
 	temperature float64,
 ) (ToolLoopResult, error) {
-	return runOpenAIToolLoop(ctx, client, history, registry, policy, maxCalls, maxTokens, temperature, nil)
+	return runOpenAIToolLoop(ctx, client, history, registry, policy, maxCalls, maxTokens, temperature, nil, nil)
 }
 
 func RunToolLoopBudgeted(
@@ -599,7 +607,25 @@ func RunToolLoopBudgeted(
 	tracker *runbudget.Tracker,
 ) (ToolLoopResult, error) {
 	return runOpenAIToolLoop(
+		ctx, client, history, registry, policy, maxCalls, maxTokens, temperature, tracker, nil,
+	)
+}
+
+func RunToolLoopBudgetedObserved(
+	ctx context.Context,
+	client *Client,
+	history []ToolMessage,
+	registry *mcp.ToolRegistry,
+	policy mcp.ToolAuthorizationPolicy,
+	maxCalls int,
+	maxTokens int,
+	temperature float64,
+	tracker *runbudget.Tracker,
+	observeToolResult func([]ToolMessage, mcp.ToolCall, mcp.ToolResult) ([]ToolMessage, error),
+) (ToolLoopResult, error) {
+	return runOpenAIToolLoop(
 		ctx, client, history, registry, policy, maxCalls, maxTokens, temperature, tracker,
+		observeToolResult,
 	)
 }
 

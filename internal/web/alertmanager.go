@@ -47,6 +47,7 @@ type opsAlertmanagerAPIResponse struct {
 	Status         string               `json:"status"`
 	GroupKey       string               `json:"group_key"`
 	Answer         string               `json:"answer"`
+	Skills         []string             `json:"skills,omitempty"`
 	Activity       []opsToolActivity    `json:"activity"`
 	CapabilityGaps []opsCapabilityGap   `json:"capability_gaps"`
 	Investigation  investigation.Result `json:"investigation"`
@@ -101,7 +102,7 @@ func (server *opsServer) handleAlertmanagerWebhook(writer http.ResponseWriter, r
 	)
 	writeJSON(writer, http.StatusOK, opsAlertmanagerAPIResponse{
 		RunID: auditRun.id(), Accepted: true, Model: server.modelID, Status: webhook.Status, GroupKey: webhook.GroupKey,
-		Answer: result.Answer, Activity: buildOpsToolActivity(result, false),
+		Answer: result.Answer, Skills: result.Skills, Activity: buildOpsToolActivity(result, false),
 		CapabilityGaps: buildOpsCapabilityGaps(result),
 		Investigation:  investigationResult,
 		Budget:         result.Tracker.Snapshot(),

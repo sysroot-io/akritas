@@ -95,9 +95,12 @@ var StartMCPHost = mcp.StartMCPHost
 
 const localRAGSearchToolName = rag.SearchToolName
 const localInvestigationPlanToolName = web.InvestigationPlanToolName
+const localKnowledgeListSkillsName = web.KnowledgeListSkillsToolName
+const localKnowledgeLoadSkillName = web.KnowledgeLoadSkillToolName
 
 var RegisterRAGSearchTool = rag.RegisterRAGSearchTool
 var registerOpsInvestigationPlanTool = web.RegisterInvestigationPlanTool
+var registerOpsKnowledgeSkillTools = web.RegisterKnowledgeSkillTools
 var registerReadOnlyTools = web.RegisterReadOnlyTools
 
 func newOpsServer(

@@ -12,38 +12,47 @@ import (
 	"akritas/internal/audit"
 	akritasinstructions "akritas/internal/instructions"
 	"akritas/internal/runbudget"
+	akritasskills "akritas/internal/skills"
 )
 
 func runOpsServer(arguments []string) {
+	options, configuredPath, err := loadOpsServerOptions(arguments, os.LookupEnv)
+	if err != nil {
+		panic(err)
+	}
 	flags := flag.NewFlagSet("serve", flag.ExitOnError)
-	address := flags.String("address", "127.0.0.1:8090", "HTTP listen address")
-	baseURL := flags.String("base-url", "http://127.0.0.1:8080/v1", "upstream OpenAI-compatible API ending in /v1")
-	upstreamModel := flags.String("upstream-model", "", "upstream model ID; empty discovers the first model")
-	modelID := flags.String("model", "akritas", "model ID exposed by this server")
-	upstreamAPIKeyEnvironment := flags.String("upstream-api-key-env", "OPENAI_API_KEY", "environment variable containing upstream API key")
-	apiKeyEnvironment := flags.String("api-key-env", "AKRITAS_API_KEY", "environment variable containing inbound Bearer API key")
-	systemInstructionsPath := flags.String("system-instructions", akritasinstructions.DefaultPath, "UTF-8 Markdown file with global model instructions")
-	responseLanguage := flags.String("response-language", defaultResponseLanguage, "BCP 47 language tag for model-generated prose; the Web UI remains English")
-	ragIndexPath := flags.String("rag-index", "", "local RAG index; empty disables RAG")
-	mcpConfigPath := flags.String("mcp-config", "", "MCP configuration; only authorized read tools are exposed")
-	workspaceConfigPath := flags.String("workspace-config", "", "strict JSON workspace catalog; roots are relative to the config file")
-	auditLogPath := flags.String("audit-log", "data/audit/akritas.jsonl", "append-only JSONL run and audit log; empty disables persistence")
-	searchTopK := flags.Int("search-top-k", 5, "default and maximum RAG results")
-	resultRunes := flags.Int("result-runes", 800, "maximum runes in each RAG excerpt")
-	defaultMaxTokens := flags.Int("max-tokens", 1024, "default response token limit")
-	maxTokensLimit := flags.Int("max-tokens-limit", 4096, "hard response token limit")
-	maxToolCalls := flags.Int("max-tool-calls", 8, "maximum read-only tool calls per chat request")
-	maxIterations := flags.Int("max-iterations", 12, "maximum upstream model calls per Run")
-	maxToolResultBytes := flags.Int("max-tool-result-bytes", 2*1024*1024, "maximum aggregate tool result bytes per Run")
-	maxRetrievedContextBytes := flags.Int("max-retrieved-context-bytes", 128*1024, "maximum retrieved context bytes per Run")
-	maxContextTokens := flags.Int("max-context-tokens", 40000, "conservative host-counted context token limit per Run")
-	maxModelTokens := flags.Int("max-model-tokens", 16384, "maximum aggregate model output tokens per Run")
-	temperature := flags.Float64("temperature", 0.2, "default model sampling temperature")
-	requestTimeout := flags.Duration("request-timeout", 10*time.Minute, "upstream request and generation timeout")
-	var workspaceValues repeatedStringFlag
-	var changeValidatorProfiles repeatedStringFlag
-	flags.Var(&workspaceValues, "workspace", "allowed change workspace as name=directory; flag may be repeated")
-	flags.Var(&changeValidatorProfiles, "change-validator", "opt-in executable validator: go-vet, go-test or yamllint; may be repeated")
+	configPath := flags.String("config", configuredPath, "strict JSON service configuration; AKRITAS_CONFIG provides the default path")
+	address := flags.String("address", options.Address, "HTTP listen address")
+	baseURL := flags.String("base-url", options.BaseURL, "upstream OpenAI-compatible API ending in /v1")
+	upstreamModel := flags.String("upstream-model", options.UpstreamModel, "upstream model ID; empty discovers the first model")
+	modelID := flags.String("model", options.ModelID, "model ID exposed by this server")
+	upstreamAPIKeyEnvironment := flags.String("upstream-api-key-env", options.UpstreamAPIKeyEnvironment, "environment variable containing upstream API key")
+	apiKeyEnvironment := flags.String("api-key-env", options.APIKeyEnvironment, "environment variable containing inbound Bearer API key")
+	systemInstructionsPath := flags.String("system-instructions", options.SystemInstructionsPath, "UTF-8 Markdown file with global model instructions")
+	skillsDirectory := flags.String("skills-dir", options.SkillsDirectory, "directory of selectively loaded */SKILL.md operational skills; empty disables skills")
+	responseLanguage := flags.String("response-language", options.ResponseLanguage, "BCP 47 language tag for model-generated prose; the Web UI remains English")
+	ragIndexPath := flags.String("rag-index", options.RAGIndexPath, "local RAG index; empty disables RAG")
+	mcpConfigPath := flags.String("mcp-config", options.MCPConfigPath, "MCP configuration; only authorized read tools are exposed")
+	workspaceConfigPath := flags.String("workspace-config", options.WorkspaceConfigPath, "strict JSON workspace catalog; roots are relative to the config file")
+	auditLogPath := flags.String("audit-log", options.AuditLogPath, "append-only JSONL run and audit log; empty disables persistence")
+	searchTopK := flags.Int("search-top-k", options.SearchTopK, "default and maximum RAG results")
+	resultRunes := flags.Int("result-runes", options.ResultRunes, "maximum runes in each RAG excerpt")
+	defaultMaxTokens := flags.Int("max-tokens", options.DefaultMaxTokens, "default response token limit")
+	maxTokensLimit := flags.Int("max-tokens-limit", options.MaxTokensLimit, "hard response token limit")
+	maxToolCalls := flags.Int("max-tool-calls", options.MaxToolCalls, "maximum read-only tool calls per chat request")
+	maxIterations := flags.Int("max-iterations", options.MaxIterations, "maximum upstream model calls per Run")
+	maxToolResultBytes := flags.Int("max-tool-result-bytes", options.MaxToolResultBytes, "maximum aggregate tool result bytes per Run")
+	maxRetrievedContextBytes := flags.Int("max-retrieved-context-bytes", options.MaxRetrievedContextBytes, "maximum retrieved context bytes per Run")
+	maxContextTokens := flags.Int("max-context-tokens", options.MaxContextTokens, "conservative host-counted context token limit per Run")
+	maxModelTokens := flags.Int("max-model-tokens", options.MaxModelTokens, "maximum aggregate model output tokens per Run")
+	temperature := flags.Float64("temperature", options.Temperature, "default model sampling temperature")
+	requestTimeout := flags.Duration("request-timeout", options.RequestTimeout, "upstream request and generation timeout")
+	workspaceValues := append([]string(nil), options.Workspaces...)
+	changeValidatorProfiles := append([]string(nil), options.ChangeValidatorProfiles...)
+	workspaceFlag := overridingRepeatedStringFlag{values: &workspaceValues}
+	validatorFlag := overridingRepeatedStringFlag{values: &changeValidatorProfiles}
+	flags.Var(&workspaceFlag, "workspace", "allowed change workspace as name=directory; flag may be repeated")
+	flags.Var(&validatorFlag, "change-validator", "opt-in executable validator: go-vet, go-test or yamllint; may be repeated")
 	_ = flags.Parse(arguments)
 	if strings.TrimSpace(*address) == "" || strings.TrimSpace(*modelID) == "" ||
 		*searchTopK <= 0 || *resultRunes <= 0 || *defaultMaxTokens <= 0 ||
@@ -60,6 +69,13 @@ func runOpsServer(arguments []string) {
 	systemInstructions, err := akritasinstructions.Load(*systemInstructionsPath)
 	if err != nil {
 		panic(err)
+	}
+	var skillCatalog *akritasskills.Catalog
+	if strings.TrimSpace(*skillsDirectory) != "" {
+		skillCatalog, err = akritasskills.Load(*skillsDirectory)
+		if err != nil {
+			panic(err)
+		}
 	}
 	workspaces, err := parseOpsWorkspaces(workspaceValues)
 	if err != nil {
@@ -105,6 +121,13 @@ func runOpsServer(arguments []string) {
 		panic(err)
 	}
 	policy.Allowed[localInvestigationPlanToolName] = true
+	if skillCatalog != nil {
+		if err := registerOpsKnowledgeSkillTools(registry, skillCatalog); err != nil {
+			panic(err)
+		}
+		policy.Allowed[localKnowledgeListSkillsName] = true
+		policy.Allowed[localKnowledgeLoadSkillName] = true
+	}
 	var host *MCPHost
 	ignoredMCPTools := 0
 	if strings.TrimSpace(*mcpConfigPath) != "" {
@@ -179,6 +202,7 @@ func runOpsServer(arguments []string) {
 		panic(err)
 	}
 	server.SetValidatorProfiles(commonValidatorProfiles)
+	server.SetSkillCatalog(skillCatalog)
 	if strings.TrimSpace(*auditLogPath) != "" {
 		auditStore, err := audit.Open(*auditLogPath)
 		if err != nil {
@@ -199,8 +223,9 @@ func runOpsServer(arguments []string) {
 		IdleTimeout:       2 * time.Minute,
 	}
 	fmt.Printf(
-		"Akritas Web UI: http://%s model=%s upstream=%s response_language=%s system_instructions=%s tools=%d workspaces=%d approved_changes=true\n",
-		*address, *modelID, client.Model, normalizedResponseLanguage, *systemInstructionsPath, len(registry.Definitions()), len(workspaces),
+		"Akritas Web UI: http://%s model=%s upstream=%s config=%s response_language=%s system_instructions=%s skills_dir=%s skills=%d tools=%d workspaces=%d approved_changes=true\n",
+		*address, *modelID, client.Model, *configPath, normalizedResponseLanguage, *systemInstructionsPath,
+		*skillsDirectory, skillCatalog.Len(), len(registry.Definitions()), len(workspaces),
 	)
 	if ignoredMCPTools > 0 {
 		fmt.Printf("Ignored non-read MCP tools: %d\n", ignoredMCPTools)

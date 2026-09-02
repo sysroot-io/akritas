@@ -3,7 +3,8 @@
 ## Scope
 
 This model covers the single-node Akritas service, its HTTP interfaces,
-OpenAI-compatible upstream, MCP stdio children, local RAG index, configured
+OpenAI-compatible upstream, MCP stdio children, local RAG index, operational
+skill catalog, configured
 repository workspaces, validator processes, and audit storage.
 
 ## Assets
@@ -26,6 +27,7 @@ Akritas host ---- OpenAI-compatible model (untrusted output)
     |  |  |
     |  |  +---- MCP stdio server (operator-configured, data untrusted)
     |  +------- RAG index (documents untrusted)
+    |  +------- skill catalog (operator-controlled guidance)
     +---------- workspace/temp copy/validators (repository code untrusted)
     |
     +---------- audit store (integrity-sensitive)
@@ -38,6 +40,8 @@ Akritas host ---- OpenAI-compatible model (untrusted output)
 | Unauthenticated API use | Loopback default, Bearer authentication, reverse proxy guidance | Instance-wide shared token |
 | Prompt injection from documents or alerts | Inputs labelled untrusted, operator-controlled global system instructions, runbook text grants no capability, host-side policy and execution evidence | Model can still select an irrelevant but authorized read-only query or give misleading advice |
 | System-instructions tampering | Operator-selected bounded regular file, deployment filesystem permissions, read-only container image, startup-time loading | An actor with configuration write access can alter model behavior; host capability checks still apply |
+| Service-configuration tampering | Strict versioned JSON, unknown-field rejection, bounded regular file, deployment filesystem permissions, secrets excluded from the schema | An actor with configuration write access can redirect trusted inputs or weaken deployment limits within host-accepted ranges |
+| Skill over-disclosure or irrelevant skill loading | Exact automatic selectors, metadata-only `knowledge.list_skills`, exact-name `knowledge.load_skill`, bounded files, tool-call accounting, and one shared eight-skill Run cap | Deceptive inventory or model judgment can select irrelevant trusted guidance; loaded skill content reaches the upstream model |
 | MCP privilege escalation | Explicit allowlist, pessimistic permissions, Web read-only filtering, host validation of every planned tool and argument | Authorized MCP process retains its OS permissions |
 | VictoriaMetrics scope escape | Operator-fixed URL, tenant headers, credentials, read-only endpoints, bounded responses | MetricsQL may still select every series visible to the configured VictoriaMetrics identity |
 | Arbitrary file read | Fixed RAG index, canonical workspace paths, traversal and symlink checks | Authorized workspace files remain visible to change preparation |
