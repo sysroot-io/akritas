@@ -11,12 +11,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode"
 
 	"akritas/internal/audit"
 	"akritas/internal/investigation"
+	"akritas/internal/notifications"
 	"akritas/internal/rag"
 )
 
@@ -206,6 +208,19 @@ func TestOpsChatHistoryUsesConfiguredResponseLanguage(t *testing.T) {
 }
 
 func TestOpsServerAcceptsAlertmanagerWebhook(t *testing.T) {
+	notificationCalls := 0
+	notificationServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		notificationCalls++
+		var input notifications.WebhookEnvelope
+		if err := json.NewDecoder(request.Body).Decode(&input); err != nil ||
+			input.Event != notifications.EventIncidentInvestigated ||
+			input.Incident.RunID == "" ||
+			input.Incident.Investigation.FindingStatus != investigation.FindingSuspected {
+			t.Errorf("unexpected notification: %+v err=%v", input, err)
+		}
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer notificationServer.Close()
 	upstreamCalls := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		upstreamCalls++
@@ -244,6 +259,21 @@ func TestOpsServerAcceptsAlertmanagerWebhook(t *testing.T) {
 	}))
 	defer upstream.Close()
 	server := newOpsTestServer(t, upstream.URL+"/v1", "secret", nil)
+	auditStore, err := audit.Open(filepath.Join(t.TempDir(), "alertmanager-audit.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = auditStore.Close() })
+	server.SetAuditStore(auditStore)
+	notificationConfig := filepath.Join(t.TempDir(), "notifications.json")
+	if err := os.WriteFile(notificationConfig, []byte(fmt.Sprintf(`{"version":1,"receivers":[{"name":"test","type":"webhook","url":%q}]}`, notificationServer.URL)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dispatcher, err := notifications.Load(notificationConfig, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.SetNotificationDispatcher(dispatcher)
 	payload := `{
 		"version":"4","groupKey":"{}:{alertname=\"HighCPU\"}","truncatedAlerts":0,
 		"status":"firing","receiver":"akritas","groupLabels":{"alertname":"HighCPU"},
@@ -271,13 +301,29 @@ func TestOpsServerAcceptsAlertmanagerWebhook(t *testing.T) {
 		output.Budget.Usage.Iterations != 2 {
 		t.Fatalf("unexpected Alertmanager response: %+v", output)
 	}
+	if notificationCalls != 1 || len(output.Notifications) != 1 || output.Notifications[0].Status != "delivered" {
+		t.Fatalf("notification_calls=%d deliveries=%+v", notificationCalls, output.Notifications)
+	}
+	stored, exists := auditStore.Get(output.RunID)
+	if !exists {
+		t.Fatalf("audit Run %q was not stored", output.RunID)
+	}
+	foundDeliveryEvent := false
+	for _, event := range stored.Events {
+		if event.Type == "notification_delivery" && event.Status == "delivered" && event.Metadata["receiver"] == "test" {
+			foundDeliveryEvent = true
+		}
+	}
+	if !foundDeliveryEvent {
+		t.Fatalf("notification audit event is missing: %+v", stored.Events)
+	}
 
 	invalid := strings.Replace(payload, `"version":"4"`, `"version":"3"`, 1)
 	invalidRequest := httptest.NewRequest(http.MethodPost, "/api/v1/alertmanager/webhook", bytes.NewBufferString(invalid))
 	invalidRequest.Header.Set("Authorization", "Bearer secret")
 	invalidResponse := httptest.NewRecorder()
 	server.handler().ServeHTTP(invalidResponse, invalidRequest)
-	if invalidResponse.Code != http.StatusBadRequest || upstreamCalls != 2 {
+	if invalidResponse.Code != http.StatusBadRequest || upstreamCalls != 2 || notificationCalls != 1 {
 		t.Fatalf("invalid webhook status=%d upstream_calls=%d body=%s", invalidResponse.Code, upstreamCalls, invalidResponse.Body.String())
 	}
 }
@@ -365,6 +411,221 @@ func TestOpsServerChatAndOpenAIEndpoints(t *testing.T) {
 	}
 	if upstreamCalls != 3 {
 		t.Fatalf("upstream calls=%d, want 3", upstreamCalls)
+	}
+}
+
+func TestTelegramBotWebhookUsesChatLoopHistoryCommandsAndDeduplication(t *testing.T) {
+	replies := make(chan string, 8)
+	botAPI := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/bottoken/sendMessage" {
+			http.NotFound(writer, request)
+			return
+		}
+		var payload struct {
+			ChatID string `json:"chat_id"`
+			Text   string `json:"text"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil || payload.ChatID != "42" {
+			t.Errorf("unexpected Telegram reply: %+v err=%v", payload, err)
+		}
+		replies <- payload.Text
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"ok":true}`))
+	}))
+	defer botAPI.Close()
+
+	var upstreamCalls atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		call := int(upstreamCalls.Add(1))
+		var input openAIToolRequest
+		if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
+			t.Errorf("decode upstream request: %v", err)
+		}
+		expectedMessages := 2
+		if call == 2 {
+			expectedMessages = 4
+		}
+		if len(input.Messages) != expectedMessages || input.Messages[len(input.Messages)-1].Content == nil {
+			t.Errorf("unexpected bot history on call %d: %+v", call, input.Messages)
+		}
+		answer := fmt.Sprintf("Bot answer %d", call)
+		writeJSON(writer, http.StatusOK, map[string]any{
+			"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": answer}}},
+		})
+	}))
+	defer upstream.Close()
+
+	server := newOpsTestServer(t, upstream.URL+"/v1", "main-api-key", nil)
+	auditStore, err := audit.Open(filepath.Join(t.TempDir(), "bot-audit.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = auditStore.Close() })
+	server.SetAuditStore(auditStore)
+	configPath := filepath.Join(t.TempDir(), "notifications.json")
+	config := fmt.Sprintf(`{
+		"version":1,"bot_queue_size":8,"bot_history_messages":8,"bot_history_bytes":8192,"bot_session_ttl":"1h","bot_max_sessions":8,
+		"receivers":[{"name":"telegram-ops","type":"telegram","base_url":%q,"bot_token_env":"TG_TOKEN","chat_id":"42","inbound_secret_env":"TG_SECRET","allowed_conversation_ids":["42"],"allowed_user_ids":["7"]}]
+	}`, botAPI.URL)
+	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dispatcher, err := notifications.Load(configPath, func(name string) (string, bool) {
+		values := map[string]string{"TG_TOKEN": "token", "TG_SECRET": "webhook_secret"}
+		value, exists := values[name]
+		return value, exists
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.SetNotificationDispatcher(dispatcher)
+	t.Cleanup(server.CloseBotGateway)
+	handler := server.handler()
+
+	send := func(updateID int, text string, secret string) *httptest.ResponseRecorder {
+		payload := fmt.Sprintf(`{"update_id":%d,"message":{"message_id":%d,"from":{"id":7,"is_bot":false},"chat":{"id":42},"text":%q}}`, updateID, updateID, text)
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/bots/telegram/telegram-ops/webhook", bytes.NewBufferString(payload))
+		request.Header.Set("X-Telegram-Bot-Api-Secret-Token", secret)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	waitReply := func() string {
+		t.Helper()
+		select {
+		case reply := <-replies:
+			return reply
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for Telegram reply")
+			return ""
+		}
+	}
+
+	unauthorized := send(1, "Question one", "wrong")
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status=%d body=%s", unauthorized.Code, unauthorized.Body.String())
+	}
+	first := send(1, "Question one", "webhook_secret")
+	if first.Code != http.StatusOK || !strings.Contains(waitReply(), "Bot answer 1") {
+		t.Fatalf("first status=%d body=%s", first.Code, first.Body.String())
+	}
+	duplicate := send(1, "Question one", "webhook_secret")
+	if duplicate.Code != http.StatusOK || !strings.Contains(duplicate.Body.String(), `"duplicate":true`) {
+		t.Fatalf("duplicate status=%d body=%s", duplicate.Code, duplicate.Body.String())
+	}
+	if second := send(2, "Question two", "webhook_secret"); second.Code != http.StatusOK || !strings.Contains(waitReply(), "Bot answer 2") {
+		t.Fatalf("second status=%d body=%s", second.Code, second.Body.String())
+	}
+	if reset := send(3, "/new", "webhook_secret"); reset.Code != http.StatusOK || !strings.Contains(waitReply(), "Conversation reset") {
+		t.Fatalf("reset status=%d body=%s", reset.Code, reset.Body.String())
+	}
+	if afterReset := send(4, "Question after reset", "webhook_secret"); afterReset.Code != http.StatusOK || !strings.Contains(waitReply(), "Bot answer 3") {
+		t.Fatalf("after-reset status=%d body=%s", afterReset.Code, afterReset.Body.String())
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	var runs []audit.Run
+	for time.Now().Before(deadline) {
+		runs = auditStore.List(10)
+		if len(runs) == 3 && runs[0].Status == audit.RunSucceeded && runs[1].Status == audit.RunSucceeded && runs[2].Status == audit.RunSucceeded {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if upstreamCalls.Load() != 3 || len(runs) != 3 || runs[0].Source != "telegram_bot" {
+		t.Fatalf("upstream_calls=%d runs=%+v", upstreamCalls.Load(), runs)
+	}
+	foundReply := false
+	for _, event := range runs[0].Events {
+		if event.Type == "bot_reply" && event.Status == "delivered" {
+			foundReply = true
+		}
+	}
+	if !foundReply {
+		t.Fatalf("bot_reply audit event is missing: %+v", runs[0].Events)
+	}
+}
+
+func TestTelegramPollingFeedsChatLoopAndReplies(t *testing.T) {
+	replies := make(chan string, 1)
+	botAPI := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/bottoken/getUpdates":
+			var input struct {
+				Offset int64 `json:"offset"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
+				t.Errorf("decode polling request: %v", err)
+				return
+			}
+			if input.Offset == 0 {
+				writer.Header().Set("Content-Type", "application/json")
+				_, _ = writer.Write([]byte(`{"ok":true,"result":[{"update_id":1,"message":{"message_id":9,"from":{"id":7,"is_bot":false},"chat":{"id":42},"text":"Check pg01"}}]}`))
+				return
+			}
+			<-request.Context().Done()
+		case "/bottoken/sendMessage":
+			var payload struct {
+				ChatID string `json:"chat_id"`
+				Text   string `json:"text"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&payload); err != nil || payload.ChatID != "42" {
+				t.Errorf("unexpected Telegram polling reply: %+v err=%v", payload, err)
+				return
+			}
+			replies <- payload.Text
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`{"ok":true}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	t.Cleanup(botAPI.Close)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writeJSON(writer, http.StatusOK, map[string]any{
+			"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "Polling answer"}}},
+		})
+	}))
+	defer upstream.Close()
+	server := newOpsTestServer(t, upstream.URL+"/v1", "main-api-key", nil)
+	configPath := filepath.Join(t.TempDir(), "notifications.json")
+	config := fmt.Sprintf(`{"version":1,"receivers":[{"name":"telegram-ops","type":"telegram","base_url":%q,"bot_token_env":"TG_TOKEN","chat_id":"42","inbound_mode":"polling"}]}`, botAPI.URL)
+	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dispatcher, err := notifications.Load(configPath, func(name string) (string, bool) {
+		if name == "TG_TOKEN" {
+			return "token", true
+		}
+		return "", false
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.SetNotificationDispatcher(dispatcher)
+	t.Cleanup(server.CloseBotGateway)
+	select {
+	case reply := <-replies:
+		if reply != "Polling answer" {
+			t.Fatalf("unexpected polling reply: %q", reply)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for Telegram polling reply")
+	}
+}
+
+func TestTrimBotRequestHistoryPreservesLatestUserMessage(t *testing.T) {
+	history := make([]openAIChatMessage, 0, 65)
+	for index := 0; index < 32; index++ {
+		history = append(history,
+			openAIChatMessage{Role: "user", Content: fmt.Sprintf("question-%d", index)},
+			openAIChatMessage{Role: "assistant", Content: fmt.Sprintf("answer-%d", index)},
+		)
+	}
+	history = append(history, openAIChatMessage{Role: "user", Content: "latest"})
+	trimmed := trimBotRequestHistory(history)
+	if len(trimmed) > maximumOpsChatMessages || trimmed[len(trimmed)-1].Content != "latest" || trimmed[0].Role != "user" {
+		t.Fatalf("unexpected trimmed history: %+v", trimmed)
 	}
 }
 

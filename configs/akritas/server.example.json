@@ -11,6 +11,7 @@
   "response_language": "en",
   "rag_index": "",
   "mcp_config": "",
+  "notifications_config": "",
   "workspace_config": "",
   "audit_log": "data/audit/akritas.jsonl",
   "search_top_k": 5,

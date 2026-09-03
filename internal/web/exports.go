@@ -8,6 +8,7 @@ import (
 	"akritas/internal/audit"
 	"akritas/internal/clients/openai"
 	"akritas/internal/mcp"
+	"akritas/internal/notifications"
 	"akritas/internal/runbudget"
 	"akritas/internal/skills"
 )
@@ -44,6 +45,21 @@ func (server *opsServer) SetAuditStore(store *audit.Store) {
 
 func (server *opsServer) SetSkillCatalog(catalog *skills.Catalog) {
 	server.skillCatalog = catalog
+}
+
+func (server *opsServer) SetNotificationDispatcher(dispatcher *notifications.Dispatcher) {
+	if server.botGateway != nil {
+		server.botGateway.close()
+	}
+	server.notifications = dispatcher
+	server.botGateway = newOpsBotGateway(server, dispatcher)
+}
+
+func (server *opsServer) CloseBotGateway() {
+	if server.botGateway != nil {
+		server.botGateway.close()
+		server.botGateway = nil
+	}
 }
 
 func (server *opsServer) SetRunBudget(limits runbudget.Limits) error {

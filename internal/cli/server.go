@@ -33,6 +33,7 @@ func runOpsServer(arguments []string) {
 	responseLanguage := flags.String("response-language", options.ResponseLanguage, "BCP 47 language tag for model-generated prose; the Web UI remains English")
 	ragIndexPath := flags.String("rag-index", options.RAGIndexPath, "local RAG index; empty disables RAG")
 	mcpConfigPath := flags.String("mcp-config", options.MCPConfigPath, "MCP configuration; only authorized read tools are exposed")
+	notificationsConfigPath := flags.String("notifications-config", options.NotificationsConfigPath, "incident notification and bot adapter configuration; empty disables both")
 	workspaceConfigPath := flags.String("workspace-config", options.WorkspaceConfigPath, "strict JSON workspace catalog; roots are relative to the config file")
 	auditLogPath := flags.String("audit-log", options.AuditLogPath, "append-only JSONL run and audit log; empty disables persistence")
 	searchTopK := flags.Int("search-top-k", options.SearchTopK, "default and maximum RAG results")
@@ -162,6 +163,13 @@ func runOpsServer(arguments []string) {
 		}
 		policy.Allowed[localRAGSearchToolName] = true
 	}
+	var notificationDispatcher *NotificationDispatcher
+	if strings.TrimSpace(*notificationsConfigPath) != "" {
+		notificationDispatcher, err = LoadNotificationDispatcher(*notificationsConfigPath, os.LookupEnv)
+		if err != nil {
+			panic(err)
+		}
+	}
 
 	upstreamAPIKey := ""
 	if strings.TrimSpace(*upstreamAPIKeyEnvironment) != "" {
@@ -203,6 +211,8 @@ func runOpsServer(arguments []string) {
 	}
 	server.SetValidatorProfiles(commonValidatorProfiles)
 	server.SetSkillCatalog(skillCatalog)
+	server.SetNotificationDispatcher(notificationDispatcher)
+	defer server.CloseBotGateway()
 	if strings.TrimSpace(*auditLogPath) != "" {
 		auditStore, err := audit.Open(*auditLogPath)
 		if err != nil {
@@ -223,9 +233,9 @@ func runOpsServer(arguments []string) {
 		IdleTimeout:       2 * time.Minute,
 	}
 	fmt.Printf(
-		"Akritas Web UI: http://%s model=%s upstream=%s config=%s response_language=%s system_instructions=%s skills_dir=%s skills=%d tools=%d workspaces=%d approved_changes=true\n",
+		"Akritas Web UI: http://%s model=%s upstream=%s config=%s response_language=%s system_instructions=%s skills_dir=%s skills=%d notifications=%d bots=%d tools=%d workspaces=%d approved_changes=true\n",
 		*address, *modelID, client.Model, *configPath, normalizedResponseLanguage, *systemInstructionsPath,
-		*skillsDirectory, skillCatalog.Len(), len(registry.Definitions()), len(workspaces),
+		*skillsDirectory, skillCatalog.Len(), notificationDispatcher.Len(), notificationDispatcher.BotReceiverCount(), len(registry.Definitions()), len(workspaces),
 	)
 	if ignoredMCPTools > 0 {
 		fmt.Printf("Ignored non-read MCP tools: %d\n", ignoredMCPTools)

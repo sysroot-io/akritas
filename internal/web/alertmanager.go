@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"akritas/internal/investigation"
+	"akritas/internal/notifications"
 	"akritas/internal/runbudget"
 )
 
@@ -41,17 +42,18 @@ type opsAlertmanagerWebhookAlert struct {
 }
 
 type opsAlertmanagerAPIResponse struct {
-	RunID          string               `json:"run_id,omitempty"`
-	Accepted       bool                 `json:"accepted"`
-	Model          string               `json:"model"`
-	Status         string               `json:"status"`
-	GroupKey       string               `json:"group_key"`
-	Answer         string               `json:"answer"`
-	Skills         []string             `json:"skills,omitempty"`
-	Activity       []opsToolActivity    `json:"activity"`
-	CapabilityGaps []opsCapabilityGap   `json:"capability_gaps"`
-	Investigation  investigation.Result `json:"investigation"`
-	Budget         runbudget.Snapshot   `json:"budget"`
+	RunID          string                         `json:"run_id,omitempty"`
+	Accepted       bool                           `json:"accepted"`
+	Model          string                         `json:"model"`
+	Status         string                         `json:"status"`
+	GroupKey       string                         `json:"group_key"`
+	Answer         string                         `json:"answer"`
+	Skills         []string                       `json:"skills,omitempty"`
+	Activity       []opsToolActivity              `json:"activity"`
+	CapabilityGaps []opsCapabilityGap             `json:"capability_gaps"`
+	Investigation  investigation.Result           `json:"investigation"`
+	Notifications  []notifications.DeliveryResult `json:"notifications,omitempty"`
+	Budget         runbudget.Snapshot             `json:"budget"`
 }
 
 func (server *opsServer) handleAlertmanagerWebhook(writer http.ResponseWriter, request *http.Request) {
@@ -93,6 +95,10 @@ func (server *opsServer) handleAlertmanagerWebhook(writer http.ResponseWriter, r
 		"confidence":     string(investigationResult.Confidence),
 		"evidence_count": fmt.Sprintf("%d", len(investigationResult.Evidence)),
 	})
+	activity := buildOpsToolActivity(result, false)
+	capabilityGaps := buildOpsCapabilityGaps(result)
+	deliveries := server.deliverIncidentNotifications(ctx, auditRun.id(), webhook, result, investigationResult, activity, capabilityGaps)
+	auditRun.addNotificationEvents(deliveries)
 	usageMetadata := opsRunUsageMetadata(result)
 	usageMetadata["alerts"] = fmt.Sprintf("%d", len(webhook.Alerts))
 	auditRun.succeed(usageMetadata)
@@ -102,9 +108,10 @@ func (server *opsServer) handleAlertmanagerWebhook(writer http.ResponseWriter, r
 	)
 	writeJSON(writer, http.StatusOK, opsAlertmanagerAPIResponse{
 		RunID: auditRun.id(), Accepted: true, Model: server.modelID, Status: webhook.Status, GroupKey: webhook.GroupKey,
-		Answer: result.Answer, Skills: result.Skills, Activity: buildOpsToolActivity(result, false),
-		CapabilityGaps: buildOpsCapabilityGaps(result),
+		Answer: result.Answer, Skills: result.Skills, Activity: activity,
+		CapabilityGaps: capabilityGaps,
 		Investigation:  investigationResult,
+		Notifications:  deliveries,
 		Budget:         result.Tracker.Snapshot(),
 	})
 }

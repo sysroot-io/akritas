@@ -45,6 +45,15 @@ and Alertmanager fields are untrusted.
 12. The optional service configuration uses a versioned strict JSON schema with
     bounded input. It contains credential variable names, not secret values;
     actual keys remain in the process environment.
+13. Исходящие уведомления используют отдельную строгую конфигурацию. URL и
+    адресаты принадлежат оператору и никогда не принимаются из alert или ответа
+    модели. Токены и HMAC-секреты читаются из именованных переменных окружения.
+14. Bot ingress не использует общий API key. Telegram polling аутентифицируется
+    bot token при исходящем TLS-соединении с Bot API; Telegram webhook
+    проверяется по `X-Telegram-Bot-Api-Secret-Token`, Mattermost — по token
+    outgoing webhook/slash command. После этого host применяет allowlists
+    conversation и user IDs, подавляет duplicate event IDs и допускает только
+    bounded text.
 
 ## Permission Model
 
@@ -95,6 +104,16 @@ workspace authorization is not implemented.
 - Skill files are trusted configuration. A malicious skill can misguide model
   reasoning, but cannot add tools or bypass host-side authorization, argument
   validation, budgets, and audit controls.
+- Универсальный webhook получает полный структурированный результат и поэтому
+  должен считаться доверенным получателем операционных данных. Для проверки
+  источника доступны Bearer-токен и подпись `HMAC-SHA256`; Telegram и Mattermost
+  получают сокращённое представление без raw tool payload. Ответные тела
+  получателей и секреты не пишутся в аудит или server log.
+- Bot conversation history хранится только в bounded process memory и исчезает
+  при restart. Успешно доставленные пары user/assistant ограничиваются числом
+  сообщений, bytes, TTL и общим количеством sessions. Telegram bot messages
+  игнорируются по `is_bot`; Mattermost inbound требует user allowlist, чтобы
+  REST reply bot не создал feedback loop.
 
 ## Validator Boundary
 
@@ -128,3 +147,9 @@ for executable validators near production.
 - VictoriaMetrics or an intermediary can place sensitive data in an error
   response. Operators who enable MCP debug logging must protect and expire the
   resulting stderr logs.
+- Скомпрометированный настроенный получатель уведомлений видит отправленные ему
+  данные инцидента. Однократная best-effort доставка не имеет persistent outbox:
+  кратковременная ошибка канала может привести к пропущенному уведомлению.
+- Скомпрометированный bot ingress secret в пределах разрешённого chat/channel
+  позволяет ставить запросы в очередь от allowlisted identity. Provider IDs не
+  являются cryptographic identity без валидного provider secret.

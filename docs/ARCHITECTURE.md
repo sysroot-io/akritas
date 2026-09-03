@@ -9,7 +9,7 @@ workflows:
 person / Alertmanager / OpenAI client
                  |
                  v
-             Akritas host
+             Akritas host <---------> bot gateways / notifications
        /          |           \
   RAG/BM25    MCP adapters    change pipeline
        \          |           /
@@ -58,6 +58,7 @@ environment and are not fields in the JSON schema.
 - The Alertmanager webhook separates the event source from incident processing.
 - The workspace catalog separates the change pipeline from Git repository locations.
 - Validator profiles separate the model proposal from actual project verification.
+- Конфигурация уведомлений отделяет результат расследования от универсального webhook, Telegram и Mattermost.
 
 As the infrastructure grows, individual functions can be delegated to Rundeck,
 StackStorm, Keep, or internal services. The preferred integration is an MCP
@@ -79,6 +80,7 @@ internal/victoriametrics/     bounded read-only VictoriaMetrics MCP tools
 internal/change/              discovery, proposal, validators, and approval
 internal/clients/openai/      OpenAI-compatible API client and tool loop
 internal/audit/               durable run lifecycle and security event log
+internal/notifications/       incident delivery and bidirectional bot adapters
 ```
 
 `cmd/akritas` depends only on the CLI adapter. Domain packages do not depend on
@@ -115,6 +117,22 @@ Alertmanager flow converts the free-form answer into a strict
 actual tool-call IDs before accepting the result. `confidence` is descriptive
 and cannot authorize a tool call or workspace change. The validated result is
 persisted as its own append-only audit record and restored during audit replay.
+
+После валидации результата Alertmanager host может передать его в настроенные
+исходящие каналы. Адреса, идентификаторы получателей и имена переменных с
+секретами определяет оператор; alert, runbook и модель не могут выбрать URL или
+канал. Все получатели вызываются параллельно с отдельным ограничением времени.
+Ошибка доставки фиксируется в ответе и аудите, но не превращает уже успешное
+расследование в HTTP 5xx и не заставляет Alertmanager повторно запускать модель.
+
+Telegram и Mattermost также могут работать как bidirectional chat adapters.
+Telegram получает updates через long polling либо provider-specific webhook;
+Mattermost использует outgoing webhook/slash command. Poller или webhook
+handler применяет operator allowlists до постановки сообщения в bounded queue;
+webhook дополнительно проверяет отдельный ingress secret. Worker хранит bounded
+in-memory history по provider/receiver/conversation, вызывает тот же read-only
+Chat loop и отправляет ответ через provider API. Bot ingress не публикует
+change Apply API и не получает дополнительных tools или permissions.
 
 Commit, push, and merge-request creation are outside the current trusted boundary.
 

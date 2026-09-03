@@ -4,8 +4,8 @@
 
 This model covers the single-node Akritas service, its HTTP interfaces,
 OpenAI-compatible upstream, MCP stdio children, local RAG index, operational
-skill catalog, configured
-repository workspaces, validator processes, and audit storage.
+skill catalog, configured repository workspaces, validator processes, audit
+storage, and configured outbound notification receivers.
 
 ## Assets
 
@@ -31,6 +31,8 @@ Akritas host ---- OpenAI-compatible model (untrusted output)
     +---------- workspace/temp copy/validators (repository code untrusted)
     |
     +---------- audit store (integrity-sensitive)
+    |
+    +---------- configured webhook / Telegram / Mattermost receiver
 ```
 
 ## Threats and Controls
@@ -52,6 +54,13 @@ Akritas host ---- OpenAI-compatible model (untrusted output)
 | Validator code execution | Opt-in profiles, fixed commands, offline Go settings, timeout, temp copy | Not an OS sandbox; direct network access remains possible |
 | Resource exhaustion | Host-owned Run budgets for duration, model calls, planned and adaptive tool calls, context, model tokens, and aggregate results; one generation slot; bounded MCP HTTP duration and response size; bounded pending approvals | Expensive metrics queries and other authorized requests can still consume resources up to configured backend and host limits |
 | Fabricated investigation evidence | Strict result schema and allowlisted host-created evidence references | A valid reference does not guarantee that the model interpreted the evidence correctly |
+| SSRF или утечка через исходящий webhook | URL и адресаты задаются только оператором в строгой bounded-конфигурации; alert и модель не управляют маршрутом; секреты остаются в environment | Компрометация конфигурации позволяет перенаправить операционные данные |
+| Упоминания и Markdown-инъекция в чат | Адаптеры используют фиксированный шаблон, нейтрализуют `@`, схлопывают переносы в полях и экранируют Mattermost Markdown | Текст модели остаётся недоверенным содержимым сообщения |
+| Повторный запуск расследования при сбое уведомления | Ошибка получателя возвращается как delivery status и audit event, но успешный Alertmanager Run остаётся HTTP 200 | Без внешнего outbox временный сбой может потерять уведомление |
+| Подделка входящего bot message | Telegram polling использует bot token через TLS; webhooks используют отдельный provider secret и constant-time comparison; оба режима применяют conversation/user allowlists и bounded payload | Компрометация bot/provider secret и allowlisted account позволяет отправлять запросы в Chat loop |
+| Telegram/Mattermost retry storm | Polling offset продвигается после queue acceptance; webhook update подтверждается до model execution; duplicate event IDs подавляются в bounded memory, full webhook queue отвечает 503 | Dedupe исчезает при restart; provider может повторить событие после restart |
+| Bot feedback loop | Telegram messages с `is_bot` игнорируются; Mattermost inbound требует explicit user allowlist; model output нейтрализует mentions | Ошибочная allowlist, содержащая Mattermost bot user, может вернуть loop |
+| Истощение памяти bot sessions | Bounded queue, history messages/bytes, session TTL, maximum session count, global generation slot | Allowlisted users могут занять очередь до configured bound |
 | Audit deletion or modification | Durable append-only application writes, restrictive volume permissions, backups | Host administrator can alter files; no signed log chain yet |
 | Compromised upstream model | No direct filesystem or production access; host validates every action | Model can provide deceptive advice or repeatedly invalid proposals |
 
@@ -68,4 +77,4 @@ operation. Test names should describe the threat they enforce.
 Revisit this threat model whenever Akritas changes global-instruction loading,
 adds write-capable tools, per-user
 authorization, remote workspaces, new validator profiles, network-accessible MCP
-transports, signed audit records, or multi-node deployment.
+transports, новый транспорт уведомлений, signed audit records, or multi-node deployment.

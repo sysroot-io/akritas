@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "timeout": "10s",
+  "bot_queue_size": 64,
+  "bot_history_messages": 20,
+  "bot_history_bytes": 65536,
+  "bot_session_ttl": "24h",
+  "bot_max_sessions": 256,
+  "receivers": [
+    {
+      "name": "incident-automation",
+      "type": "webhook",
+      "url_env": "AKRITAS_INCIDENT_WEBHOOK_URL",
+      "bearer_token_env": "AKRITAS_INCIDENT_WEBHOOK_TOKEN",
+      "hmac_secret_env": "AKRITAS_INCIDENT_WEBHOOK_HMAC_SECRET"
+    },
+    {
+      "name": "telegram-ops",
+      "type": "telegram",
+      "bot_token_env": "AKRITAS_TELEGRAM_BOT_TOKEN",
+      "chat_id_env": "AKRITAS_TELEGRAM_CHAT_ID",
+      "inbound_mode": "polling"
+    },
+    {
+      "name": "mattermost-ops",
+      "type": "mattermost",
+      "base_url_env": "AKRITAS_MATTERMOST_URL",
+      "bot_token_env": "AKRITAS_MATTERMOST_BOT_TOKEN",
+      "channel_id_env": "AKRITAS_MATTERMOST_CHANNEL_ID",
+      "inbound_secret_env": "AKRITAS_MATTERMOST_OUTGOING_WEBHOOK_TOKEN",
+      "allowed_conversation_ids_env": "AKRITAS_MATTERMOST_ALLOWED_CHANNEL_IDS",
+      "allowed_user_ids_env": "AKRITAS_MATTERMOST_ALLOWED_USER_IDS"
+    }
+  ]
+}

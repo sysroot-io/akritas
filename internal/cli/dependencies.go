@@ -10,6 +10,7 @@ import (
 	"akritas/internal/corpus"
 	"akritas/internal/mcp"
 	"akritas/internal/modeltext"
+	"akritas/internal/notifications"
 	"akritas/internal/rag"
 	"akritas/internal/web"
 )
@@ -88,10 +89,12 @@ var parseOpsWorkspaces = web.ParseWorkspaces
 type ToolRegistry = mcp.ToolRegistry
 type NamedToolPolicy = mcp.NamedToolPolicy
 type MCPHost = mcp.MCPHost
+type NotificationDispatcher = notifications.Dispatcher
 
 var LoadMCPHostConfig = mcp.LoadMCPHostConfig
 var NewToolRegistry = mcp.NewToolRegistry
 var StartMCPHost = mcp.StartMCPHost
+var LoadNotificationDispatcher = notifications.Load
 
 const localRAGSearchToolName = rag.SearchToolName
 const localInvestigationPlanToolName = web.InvestigationPlanToolName

@@ -39,8 +39,10 @@ services:
   akritas:
     environment:
       AKRITAS_CONFIG: /etc/akritas/server.json
+      AKRITAS_NOTIFICATIONS_CONFIG: /etc/akritas/notifications.json
     volumes:
       - ./configs/akritas/server.local.json:/etc/akritas/server.json:ro
+      - ./configs/akritas/notifications.local.json:/etc/akritas/notifications.json:ro
       - ./data/indexes:/var/lib/akritas/indexes:ro
       - ./configs/akritas/workspaces.local.json:/etc/akritas/workspaces.json:ro
       - /srv/repos/backend:/workspaces/backend:rw
@@ -52,6 +54,29 @@ set `rag_index` to `/var/lib/akritas/indexes/operations.tgr`,
 `/var/lib/akritas/audit/akritas.jsonl`. Start from
 `configs/akritas/server.example.json`. Environment variables can override any
 field and explicit CLI flags remain the highest-precedence option.
+
+Секреты исходящих webhook, Telegram и Mattermost не помещайте в mounted JSON.
+Поля `*_env` в notification config должны ссылаться на environment variables,
+которые container runtime получает из secret store. Ограничьте egress до
+настроенных hosts. Встроенная доставка best effort и без persistent retry; для
+гарантированной доставки направляйте generic webhook в durable queue.
+
+Telegram polling требует только исходящий HTTPS-доступ к `api.telegram.org` и
+не требует public ingress route. Убедитесь, что для этого bot token не
+зарегистрирован webhook. Для Telegram webhook mode и Mattermost reverse proxy
+должен отдельно разрешить ingress routes без подстановки общего Akritas Bearer
+token:
+
+```text
+/api/v1/bots/telegram/*/webhook
+/api/v1/bots/mattermost/*/webhook
+```
+
+Сохраните Telegram secret header и Mattermost request body, ограничьте request
+body 64 KiB, включите rate limiting и не добавляйте provider secrets в access
+logs. Эти endpoints выполняют собственную provider authentication и allowlists.
+Остальные `/api/v1/*` по-прежнему должны требовать `AKRITAS_API_KEY` на уровне
+Akritas и, при необходимости, reverse proxy.
 
 Container workspace roots in the catalog must use their mounted paths, such as
 `/workspaces/backend`. Use `:ro` for diagnostic-only workspaces. Change apply

@@ -32,6 +32,7 @@ type opsServerOptions struct {
 	ResponseLanguage          string
 	RAGIndexPath              string
 	MCPConfigPath             string
+	NotificationsConfigPath   string
 	WorkspaceConfigPath       string
 	AuditLogPath              string
 	SearchTopK                int
@@ -63,6 +64,7 @@ type opsServerConfigFile struct {
 	ResponseLanguage          *string  `json:"response_language,omitempty"`
 	RAGIndexPath              *string  `json:"rag_index,omitempty"`
 	MCPConfigPath             *string  `json:"mcp_config,omitempty"`
+	NotificationsConfigPath   *string  `json:"notifications_config,omitempty"`
 	WorkspaceConfigPath       *string  `json:"workspace_config,omitempty"`
 	AuditLogPath              *string  `json:"audit_log,omitempty"`
 	SearchTopK                *int     `json:"search_top_k,omitempty"`
@@ -220,6 +222,7 @@ func applyOpsServerConfigFile(options *opsServerOptions, file opsServerConfigFil
 	applyString(&options.ResponseLanguage, file.ResponseLanguage)
 	applyString(&options.RAGIndexPath, file.RAGIndexPath)
 	applyString(&options.MCPConfigPath, file.MCPConfigPath)
+	applyString(&options.NotificationsConfigPath, file.NotificationsConfigPath)
 	applyString(&options.WorkspaceConfigPath, file.WorkspaceConfigPath)
 	applyString(&options.AuditLogPath, file.AuditLogPath)
 	applyInt(&options.SearchTopK, file.SearchTopK)
@@ -270,6 +273,7 @@ func applyOpsServerEnvironment(
 		"AKRITAS_RESPONSE_LANGUAGE":    &options.ResponseLanguage,
 		"AKRITAS_RAG_INDEX":            &options.RAGIndexPath,
 		"AKRITAS_MCP_CONFIG":           &options.MCPConfigPath,
+		"AKRITAS_NOTIFICATIONS_CONFIG": &options.NotificationsConfigPath,
 		"AKRITAS_WORKSPACE_CONFIG":     &options.WorkspaceConfigPath,
 		"AKRITAS_AUDIT_LOG":            &options.AuditLogPath,
 	}

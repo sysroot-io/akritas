@@ -102,6 +102,7 @@ inside the separate workspace catalog remain relative to that catalog file.
 | `response_language` | `AKRITAS_RESPONSE_LANGUAGE` | `-response-language` |
 | `rag_index` | `AKRITAS_RAG_INDEX` | `-rag-index` |
 | `mcp_config` | `AKRITAS_MCP_CONFIG` | `-mcp-config` |
+| `notifications_config` | `AKRITAS_NOTIFICATIONS_CONFIG` | `-notifications-config` |
 | `workspace_config` | `AKRITAS_WORKSPACE_CONFIG` | `-workspace-config` |
 | `audit_log` | `AKRITAS_AUDIT_LOG` | `-audit-log` |
 | `search_top_k` | `AKRITAS_SEARCH_TOP_K` | `-search-top-k` |
@@ -496,7 +497,7 @@ shared 1 MiB HTTP limit. The payload is then converted into an untrusted
 operational request and synchronously passes through the same RAG,
 investigation-planning, and read-only execution loop as Chat. Labels, annotations,
 and URLs are treated as data, not instructions. A successful response contains
-`run_id`, `answer`, `activity`, `capability_gaps`, `investigation`, and `budget`;
+`run_id`, `answer`, `activity`, `capability_gaps`, `investigation`, `notifications`, and `budget`;
 it does not include raw tool payloads.
 
 `investigation` is a strict host-validated object containing independent
@@ -564,6 +565,259 @@ must therefore account for Akritas `-request-timeout` and actual model speed.
 Persistent deduplication by `groupKey` or `fingerprint` is not implemented
 yet; repeated delivery causes repeated analysis.
 
+## Уведомления и bot interfaces
+
+После успешной структуризации и host-валидации результата Alertmanager Akritas
+может отправить его в один или несколько каналов:
+
+- `webhook` — универсальный JSON webhook с optional Bearer authentication и
+  подписью HMAC-SHA256;
+- `telegram` — вызов Bot API `sendMessage` от имени Telegram-бота;
+- `mattermost` — создание поста через REST API от имени Mattermost bot account.
+
+Уведомления относятся только к Alertmanager Run. Обычный Chat и Prepare change
+их не создают. Получатели вызываются параллельно, каждый только один раз и с
+общим настраиваемым timeout. Persistent outbox и автоматических повторов пока
+нет. Сбой одного канала не останавливает остальные и не меняет успешный ответ
+Alertmanager на 5xx: иначе Alertmanager мог бы повторить всё дорогое
+расследование. Результаты доставки возвращаются в массиве `notifications` и
+записываются audit event `notification_delivery`.
+
+Подключение:
+
+```bash
+cp configs/akritas/notifications.example.json \
+  configs/akritas/notifications.local.json
+
+export AKRITAS_NOTIFICATIONS_CONFIG=configs/akritas/notifications.local.json
+export AKRITAS_INCIDENT_WEBHOOK_URL=https://automation.example/hooks/akritas
+export AKRITAS_INCIDENT_WEBHOOK_TOKEN='...'
+export AKRITAS_INCIDENT_WEBHOOK_HMAC_SECRET='...'
+export AKRITAS_TELEGRAM_BOT_TOKEN='...'
+export AKRITAS_TELEGRAM_CHAT_ID='-1001234567890'
+export AKRITAS_TELEGRAM_WEBHOOK_SECRET='...'
+export AKRITAS_TELEGRAM_ALLOWED_CHAT_IDS='-1001234567890'
+export AKRITAS_TELEGRAM_ALLOWED_USER_IDS='123456789'
+export AKRITAS_MATTERMOST_URL=https://mattermost.example
+export AKRITAS_MATTERMOST_BOT_TOKEN='...'
+export AKRITAS_MATTERMOST_CHANNEL_ID='channel-id'
+export AKRITAS_MATTERMOST_OUTGOING_WEBHOOK_TOKEN='...'
+export AKRITAS_MATTERMOST_ALLOWED_CHANNEL_IDS='channel-id'
+export AKRITAS_MATTERMOST_ALLOWED_USER_IDS='user-id'
+
+./bin/akritas serve -base-url http://127.0.0.1:8080/v1
+```
+
+Файл имеет strict JSON schema версии 1, ограничен 1 MiB и содержит от 1 до 16
+получателей. Unknown fields, duplicate names и отсутствующие environment
+variables останавливают startup. `timeout` использует Go duration syntax,
+по умолчанию равен `10s` и не может превышать одну минуту. Полный пример:
+
+```json
+{
+  "version": 1,
+  "timeout": "10s",
+  "bot_queue_size": 64,
+  "bot_history_messages": 20,
+  "bot_history_bytes": 65536,
+  "bot_session_ttl": "24h",
+  "bot_max_sessions": 256,
+  "receivers": [
+    {
+      "name": "automation",
+      "type": "webhook",
+      "url_env": "AKRITAS_INCIDENT_WEBHOOK_URL",
+      "bearer_token_env": "AKRITAS_INCIDENT_WEBHOOK_TOKEN",
+      "hmac_secret_env": "AKRITAS_INCIDENT_WEBHOOK_HMAC_SECRET"
+    },
+    {
+      "name": "telegram-ops",
+      "type": "telegram",
+      "bot_token_env": "AKRITAS_TELEGRAM_BOT_TOKEN",
+      "chat_id_env": "AKRITAS_TELEGRAM_CHAT_ID",
+      "inbound_mode": "polling"
+    },
+    {
+      "name": "mattermost-ops",
+      "type": "mattermost",
+      "base_url_env": "AKRITAS_MATTERMOST_URL",
+      "bot_token_env": "AKRITAS_MATTERMOST_BOT_TOKEN",
+      "channel_id_env": "AKRITAS_MATTERMOST_CHANNEL_ID",
+      "inbound_secret_env": "AKRITAS_MATTERMOST_OUTGOING_WEBHOOK_TOKEN",
+      "allowed_conversation_ids_env": "AKRITAS_MATTERMOST_ALLOWED_CHANNEL_IDS",
+      "allowed_user_ids_env": "AKRITAS_MATTERMOST_ALLOWED_USER_IDS"
+    }
+  ]
+}
+```
+
+Для generic webhook `url`/`url_env` обязателен. `bearer_token_env` и
+`hmac_secret_env` optional, но оба могут применяться одновременно. Akritas
+отправляет `Content-Type: application/json`, `X-Akritas-Event`,
+`X-Akritas-Delivery`, optional `X-Akritas-Run-ID` и
+`X-Akritas-Signature: sha256=<hex>`. Подпись вычисляется от точных bytes body.
+Envelope ограничен 512 KiB:
+
+```json
+{
+  "version": 1,
+  "event": "incident.investigated",
+  "delivery_id": "...",
+  "created_at": "2026-09-02T19:00:00Z",
+  "incident": {
+    "run_id": "run_...",
+    "model": "akritas",
+    "alert_status": "firing",
+    "group_key": "...",
+    "answer": "...",
+    "skills": ["postgresql"],
+    "activity": [],
+    "capability_gaps": [],
+    "investigation": {},
+    "budget": {}
+  }
+}
+```
+
+Для Telegram обязательны `bot_token_env` и `chat_id`/`chat_id_env`.
+`message_thread_id`/`message_thread_id_env` отправляет сообщение в topic;
+`base_url`/`base_url_env` нужен только для альтернативного Bot API server и по
+умолчанию равен `https://api.telegram.org`. Бот не может первым начать личный
+диалог: пользователь должен написать ему либо добавить его в нужную группу.
+
+Для Mattermost обязательны `base_url`/`base_url_env`, `bot_token_env` и
+`channel_id`/`channel_id_env`. Это именно bot account token, а не incoming
+webhook. Bot account должен состоять в нужной team/channel и иметь право
+создавать посты.
+
+Telegram и Mattermost получают компактный фиксированный текст: status,
+finding, actionability, confidence, Run ID, group, summary, affected components
+и recommended actions. Raw answer и tool payload в чат не отправляются.
+Akritas нейтрализует `@`, схлопывает переносы в полях и экранирует Mattermost
+Markdown. Telegram message ограничено 4000 Unicode symbols, Mattermost — 16000;
+превышение заканчивается явной отметкой truncation.
+
+## Диалоги через Telegram и Mattermost
+
+Receiver типа `telegram` становится bidirectional при `inbound_mode: "polling"`
+или `inbound_mode: "webhook"`. Если `inbound_mode` не указан, наличие
+`inbound_secret_env` по-прежнему включает webhook для обратной совместимости.
+Mattermost поддерживает webhook ingress.
+
+Списки `allowed_conversation_ids` и `allowed_user_ids` можно указать
+непосредственно в JSON либо получить из одноимённых `*_env` fields как JSON
+array или comma-separated list. Для Telegram polling без явного allowlist
+Akritas разрешает только `chat_id`, уже настроенный для исходящих уведомлений.
+Для webhook хотя бы один allowlist обязателен; для Mattermost обязателен user
+allowlist, который не должен содержать user ID самого бота.
+
+### Telegram long polling
+
+Рекомендуемый режим для single-node service и container за NAT:
+
+```json
+{
+  "name": "telegram-ops",
+  "type": "telegram",
+  "bot_token_env": "AKRITAS_TELEGRAM_BOT_TOKEN",
+  "chat_id_env": "AKRITAS_TELEGRAM_CHAT_ID",
+  "inbound_mode": "polling"
+}
+```
+
+Akritas вызывает Bot API `getUpdates` с long-poll timeout 30 секунд и получает
+только updates типа `message`. Public ingress URL и
+`AKRITAS_TELEGRAM_WEBHOOK_SECRET` не нужны. После временной сетевой ошибки
+poller повторяет запрос с bounded exponential backoff от 1 до 30 секунд.
+Offset продвигается только после успешной постановки разрешённого сообщения в
+локальную очередь; поэтому при перегрузке update не теряется. Poller завершается
+вместе с bot gateway.
+
+Telegram не разрешает одновременно использовать `getUpdates` и webhook. Akritas
+не удаляет webhook автоматически, потому что это внешняя control-plane
+операция. Если webhook был настроен раньше, удалите его вручную через
+`deleteWebhook`. Для текущего polling config поле `inbound_secret_env` указывать
+нельзя.
+
+### Telegram webhook и Mattermost ingress
+
+Входящие endpoints намеренно не проверяют общий `AKRITAS_API_KEY`, потому что
+Telegram и Mattermost не являются Akritas API clients. Вместо него каждый
+receiver использует provider-specific secret и allowlists:
+
+```text
+POST /api/v1/bots/telegram/{receiver}/webhook
+POST /api/v1/bots/mattermost/{receiver}/webhook
+```
+
+Для Telegram webhook receiver укажите `"inbound_mode": "webhook"`,
+`inbound_secret_env` и allowlist. Endpoint принимает JSON `Update`, проверяет header
+`X-Telegram-Bot-Api-Secret-Token`, пропускает только обычное поле `message.text`
+и игнорирует senders с `is_bot=true`. Настройте webhook самостоятельно, чтобы
+Akritas не выполнял external control-plane mutations при startup:
+
+```bash
+curl --fail-with-body \
+  -X POST "https://api.telegram.org/bot${AKRITAS_TELEGRAM_BOT_TOKEN}/setWebhook" \
+  --data-urlencode "url=https://akritas.example/api/v1/bots/telegram/telegram-ops/webhook" \
+  --data-urlencode "secret_token=${AKRITAS_TELEGRAM_WEBHOOK_SECRET}" \
+  --data-urlencode 'allowed_updates=["message"]'
+```
+
+Telegram cloud webhook требует публичный HTTPS endpoint на поддерживаемом
+Telegram port. Reverse proxy должен сохранить secret header. Conversation key
+состоит из receiver, `chat.id` и `message_thread_id`, поэтому topics имеют
+независимую историю.
+
+Mattermost ingress принимает `application/x-www-form-urlencoded` или JSON от
+outgoing webhook/slash command. В Mattermost укажите callback:
+
+```text
+https://akritas.example/api/v1/bots/mattermost/mattermost-ops/webhook
+```
+
+Token созданной integration должен совпадать с переменной из
+`inbound_secret_env`. Outgoing webhooks подходят для public channels; slash
+command можно использовать в private channel или direct message. Akritas
+отвечает не синхронным webhook body, а через bot account REST API, поэтому
+пользователь видит ответ именно от Mattermost bot. История разделяется по
+receiver и `channel_id`.
+
+Webhook handler после проверки и parsing быстро ставит сообщение в bounded
+in-memory queue и отвечает HTTP 200. Telegram poller использует ту же очередь и
+не подтверждает update новым offset, пока очередь заполнена. Model inference
+выполняет один worker через обычный global generation slot. Это предотвращает
+provider timeout и duplicate inference. Последние 4096 event IDs подавляются в
+памяти; при полном webhook queue endpoint отвечает 503, чтобы provider мог
+повторить update. Dedupe state и chat history исчезают после restart.
+
+Настройки session/queue имеют безопасные bounds:
+
+| Field | Default | Allowed |
+|---|---:|---:|
+| `bot_queue_size` | `64` | `1..1024` |
+| `bot_history_messages` | `20` | `2..64` |
+| `bot_history_bytes` | `65536` | `1024..262144` |
+| `bot_session_ttl` | `24h` | `1m..720h` |
+| `bot_max_sessions` | `256` | `1..4096` |
+
+Каждая успешная conversation turn проходит тот же RAG, planning, skill и
+authorized read-only tool loop, что `POST /api/v1/chat`. Только доставленная
+пара user/assistant попадает в session history. Bot interface не вызывает
+Prepare change, Apply и другие write endpoints.
+
+Host commands не обращаются к модели:
+
+- `/help` и `/start` показывают подсказку;
+- `/new` и `/reset` удаляют history текущего conversation;
+- `/status` показывает число сохранённых messages;
+- `/ask <text>` явно отправляет вопрос; обычный text делает то же самое.
+
+Длинный model answer делится на несколько provider messages вместо silent
+truncation. Replies фиксируются как audit event `bot_reply`; model Runs имеют
+source `telegram_bot` или `mattermost_bot`. Audit не содержит prompt, answer,
+provider secret или conversation history.
+
 ## OpenAI-Compatible API
 
 The following endpoints are available to Open WebUI and other clients:
@@ -597,7 +851,9 @@ GET  /api/v1/workspaces             names of authorized workspaces
 GET  /api/v1/runs                   latest durable runs, newest first
 GET  /api/v1/runs/{id}              run lifecycle and bounded audit events
 POST /api/v1/chat                   chat + activity + capability gaps + budget + optional debug
-POST /api/v1/alertmanager/webhook   Alertmanager v4 + structured investigation + budget
+POST /api/v1/alertmanager/webhook   Alertmanager v4 + structured investigation + notification statuses + budget
+POST /api/v1/bots/telegram/{receiver}/webhook    authenticated Telegram text ingress
+POST /api/v1/bots/mattermost/{receiver}/webhook  authenticated Mattermost text ingress
 POST /api/v1/change/simulations     read-only proposed diff
 POST /api/v1/change/simulations/{id}/apply  explicit one-time apply
 GET  /v1/models                     OpenAI model catalog

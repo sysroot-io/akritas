@@ -17,6 +17,7 @@ import (
 
 	"akritas/internal/audit"
 	"akritas/internal/modeltext"
+	"akritas/internal/notifications"
 	"akritas/internal/runbudget"
 	"akritas/internal/skills"
 )
@@ -51,6 +52,8 @@ type opsServer struct {
 	validatorProfiles []string
 	auditStore        *audit.Store
 	skillCatalog      *skills.Catalog
+	notifications     *notifications.Dispatcher
+	botGateway        *opsBotGateway
 }
 
 type opsChatAPIRequest struct {
@@ -168,6 +171,8 @@ func (server *opsServer) handler() http.Handler {
 	mux.Handle("GET /api/v1/runs/{id}", server.authenticate(http.HandlerFunc(server.handleRun)))
 	mux.Handle("POST /api/v1/chat", server.authenticate(http.HandlerFunc(server.handleChatAPI)))
 	mux.Handle("POST /api/v1/alertmanager/webhook", server.authenticate(http.HandlerFunc(server.handleAlertmanagerWebhook)))
+	mux.HandleFunc("POST /api/v1/bots/telegram/{receiver}/webhook", server.handleTelegramBotWebhook)
+	mux.HandleFunc("POST /api/v1/bots/mattermost/{receiver}/webhook", server.handleMattermostBotWebhook)
 	mux.Handle("POST /api/v1/change/simulations", server.authenticate(http.HandlerFunc(server.handleChangeAPI)))
 	mux.Handle("POST /api/v1/change/simulations/{id}/apply", server.authenticate(http.HandlerFunc(server.handleApplyChangeAPI)))
 	mux.Handle("GET /v1/models", server.authenticate(http.HandlerFunc(server.handleModels)))
@@ -240,11 +245,16 @@ func (server *opsServer) handleIndex(writer http.ResponseWriter, request *http.R
 }
 
 func (server *opsServer) handleHealth(writer http.ResponseWriter, _ *http.Request) {
+	botReceivers := 0
+	if server.notifications != nil {
+		botReceivers = server.notifications.BotReceiverCount()
+	}
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"status": "ok", "model": server.modelID,
 		"response_language": server.responseLanguage,
 		"tools":             len(server.authorizedToolCatalog()),
 		"skills":            server.skillCatalog.Len(),
+		"bots":              botReceivers,
 		"workspaces":        len(server.workspaces),
 	})
 }

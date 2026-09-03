@@ -105,6 +105,18 @@ A version-controlled workspace configuration example is available at
 `configs/akritas/workspaces.example.json`. Local configurations containing
 internal paths or credentials are excluded from Git.
 
+Завершённые расследования, запущенные входящим webhook Alertmanager, можно
+отправлять одновременно в универсальный HTTP webhook, Telegram и Mattermost.
+Подключите строгий JSON-файл через `-notifications-config` или
+`AKRITAS_NOTIFICATIONS_CONFIG`; пример находится в
+`configs/akritas/notifications.example.json`. Токены ботов и секрет подписи
+читаются только из переменных окружения. Telegram long polling не требует
+публичного endpoint; webhook остаётся альтернативным режимом. Mattermost
+использует outgoing webhook/slash command. Оба адаптера передают сообщения
+пользователей в тот же Chat investigation loop. История хранится отдельно для
+каждого chat/topic или Mattermost channel, а команды `/new`, `/status` и
+`/help` управляют сессией.
+
 ## VictoriaMetrics MCP
 
 Akritas includes a read-only stdio MCP server for VictoriaMetrics. It exposes
@@ -136,6 +148,8 @@ troubleshooting because error bodies can contain operational data.
 - Web UI and native API: `http://127.0.0.1:8090/`;
 - OpenAI-compatible facade: `/v1/models`, `/v1/chat/completions`;
 - Alertmanager webhook: `POST /api/v1/alertmanager/webhook`;
+- outbound incident notifications: generic webhook, Telegram bot, and Mattermost bot;
+- bot chat ingress: Telegram long polling or webhook, and Mattermost webhook endpoints;
 - upstream LLM: any compatible `/v1`, including llama.cpp and OpenRouter;
 - external actions: MCP stdio servers with an explicit permissions policy;
 - metrics: bundled read-only VictoriaMetrics MCP adapter;

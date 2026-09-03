@@ -9,3 +9,5 @@
 /docs/P0_READINESS.md
 /AGENTS.md
 mcp.victoriametrics.json
+configs/akritas/notifications.json
+configs/akritas/server.json
