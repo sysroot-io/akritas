@@ -30,8 +30,13 @@ const (
 
 type Incident struct {
 	RunID          string               `json:"run_id,omitempty"`
+	IncidentID     string               `json:"incident_id,omitempty"`
+	RunURL         string               `json:"run_url,omitempty"`
 	Model          string               `json:"model"`
 	AlertStatus    string               `json:"alert_status"`
+	AlertName      string               `json:"alert_name,omitempty"`
+	Source         string               `json:"source,omitempty"`
+	Entity         string               `json:"entity,omitempty"`
 	GroupKey       string               `json:"group_key"`
 	Answer         string               `json:"answer"`
 	Skills         []string             `json:"skills,omitempty"`
@@ -277,10 +282,34 @@ func formatIncidentMessage(incident Incident) string {
 	if incident.RunID != "" {
 		fmt.Fprintf(&message, "Run ID: %s\n", safeChatText(incident.RunID))
 	}
+	if incident.AlertName != "" {
+		fmt.Fprintf(&message, "Alert: %s\n", safeChatText(incident.AlertName))
+	}
+	if incident.Entity != "" {
+		fmt.Fprintf(&message, "Entity: %s\n", safeChatText(incident.Entity))
+	}
+	if incident.RunURL != "" {
+		fmt.Fprintf(&message, "Run: %s\n", safeChatText(incident.RunURL))
+	}
 	if incident.GroupKey != "" {
 		fmt.Fprintf(&message, "Group: %s\n", safeChatText(incident.GroupKey))
 	}
 	fmt.Fprintf(&message, "\nSummary\n%s", safeChatText(incident.Investigation.Summary))
+	if incident.Investigation.Impact != "" {
+		fmt.Fprintf(&message, "\n\nImpact\n%s", safeChatText(incident.Investigation.Impact))
+	}
+	if len(incident.Investigation.Evidence) > 0 {
+		message.WriteString("\n\nEvidence")
+		for _, evidence := range incident.Investigation.Evidence {
+			fmt.Fprintf(&message, "\n- %s", safeChatText(evidence))
+		}
+	}
+	if len(incident.Investigation.RuledOut) > 0 {
+		message.WriteString("\n\nRuled out")
+		for _, hypothesis := range incident.Investigation.RuledOut {
+			fmt.Fprintf(&message, "\n- %s", safeChatText(hypothesis))
+		}
+	}
 	if len(incident.Investigation.AffectedComponents) > 0 {
 		message.WriteString("\n\nAffected components")
 		for _, component := range incident.Investigation.AffectedComponents {
@@ -293,6 +322,7 @@ func formatIncidentMessage(incident Incident) string {
 			fmt.Fprintf(&message, "\n- %s", safeChatText(action))
 		}
 	}
+	fmt.Fprintf(&message, "\n\nProduction writes: %d", incident.Investigation.ProductionWrites)
 	return message.String()
 }
 

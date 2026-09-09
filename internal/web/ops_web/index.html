@@ -73,6 +73,8 @@
       background: rgba(18,26,32,.92); overflow: hidden;
     }
     .panel-head { padding: 15px 18px; border-bottom: 1px solid var(--line); }
+    .panel-head.with-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .panel-head.with-actions button { flex: none; padding: 6px 10px; }
     .panel-head h2 { margin: 0 0 3px; font-size: 16px; }
     .hint { color: var(--muted); font-size: 13px; }
     #messages { min-height: 420px; max-height: 62vh; overflow-y: auto; padding: 18px; }
@@ -130,6 +132,30 @@
     .tool-meta { margin-top: 3px; color: var(--muted); font-size: 12px; }
     .tool-description { margin-top: 7px; color: var(--text); font-size: 13px; }
     .grid { display: grid; grid-template-columns: minmax(300px,.8fr) minmax(380px,1.2fr); gap: 18px; }
+    .run-grid { display: grid; grid-template-columns: minmax(280px,.72fr) minmax(460px,1.28fr); gap: 18px; }
+    .run-list { max-height: 72vh; overflow-y: auto; }
+    .run-row { display: block; width: 100%; padding: 13px 16px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; text-align: left; background: transparent; }
+    .run-row:hover, .run-row.active { background: var(--panel-2); }
+    .run-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .run-row-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .run-row-title { color: var(--text); font-weight: 700; }
+    .run-row-meta, .fact-label { color: var(--muted); font-size: 12px; }
+    .run-status { flex: none; padding: 2px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+    .run-status.succeeded, .run-status.confirmed { border-color: rgba(91,209,165,.45); color: var(--accent); }
+    .run-status.failed { border-color: rgba(240,140,130,.55); color: var(--danger); }
+    .run-status.running, .run-status.suspected, .run-status.inconclusive { border-color: #987b43; color: #e3c37f; }
+    .run-detail { padding: 18px; }
+    .facts { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px; margin-bottom: 20px; }
+    .fact { padding: 10px; border: 1px solid var(--line); border-radius: 8px; overflow-wrap: anywhere; }
+    .fact-value { margin-top: 2px; }
+    .run-section { margin-top: 20px; }
+    .run-section h3 { margin: 0 0 8px; font-size: 14px; }
+    .run-section ul { margin: 0; padding-left: 21px; }
+    .timeline-item { padding: 9px 0; border-bottom: 1px solid var(--line); font: 12px/1.45 ui-monospace, monospace; }
+    .raw-tool { margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; }
+    .raw-tool summary { cursor: pointer; color: var(--accent); }
+    .raw-tool pre { max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+    #run-followup-answer { margin-top: 12px; }
     .form { padding: 18px; }
     .field { margin-bottom: 15px; }
     .field label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 13px; }
@@ -149,6 +175,8 @@
       .header-tools { width: 100%; }
       .api-key { flex: 1; }
       .grid { grid-template-columns: 1fr; }
+      .run-grid { grid-template-columns: 1fr; }
+      .facts { grid-template-columns: repeat(2,minmax(0,1fr)); }
       .message { grid-template-columns: 1fr; gap: 3px; }
       #messages { min-height: 340px; }
     }
@@ -174,8 +202,9 @@
   </dialog>
   <main>
     <nav>
-      <button class="active" data-view="chat">Chat</button>
-      <button data-view="change">Prepare change</button>
+      <button type="button" class="active" data-view="chat" aria-controls="view-chat">Chat</button>
+      <button type="button" data-view="runs" aria-controls="view-runs">Runs</button>
+      <button type="button" data-view="change" aria-controls="view-change">Prepare change</button>
     </nav>
 
     <section id="view-chat" class="view active">
@@ -192,6 +221,22 @@
             <label class="check"><input id="debug" type="checkbox"> include payloads in the next response</label>
             <button id="send-chat" class="primary">Send</button>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-runs" class="view">
+      <div class="run-grid">
+        <div class="panel">
+          <div class="panel-head with-actions">
+            <div><h2>Investigation Runs</h2><div class="hint">Host-owned incident history and evidence.</div></div>
+            <button id="refresh-runs" type="button">Refresh</button>
+          </div>
+          <div id="run-list" class="run-list"><div class="hint form">Loading...</div></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Run details</h2><div class="hint">Facts, evidence, timeline, and scoped follow-up.</div></div>
+          <div id="run-detail" class="run-detail"><div class="hint">Select a Run.</div></div>
         </div>
       </div>
     </section>
@@ -219,7 +264,7 @@
     </section>
   </main>
   <script>
-	const state = { messages: [], pendingApproval: null, toolCatalog: null };
+	const state = { messages: [], pendingApproval: null, toolCatalog: null, runID: null };
     const byId = id => document.getElementById(id);
     const authHeaders = () => {
       const key = byId('api-key').value.trim();
@@ -421,6 +466,123 @@
         state.toolCatalog = null; list.replaceChildren(); const message = document.createElement('div'); message.className = 'activity-item failed'; message.textContent = `Failed to load tools: ${error.message}`; list.append(message);
       }
     }
+    function textNode(tag, value, className = '') {
+      const node = document.createElement(tag); if (className) node.className = className; node.textContent = value; return node;
+    }
+    function runEntity(run) {
+      const event = (run.events || []).find(item => item.type === 'alert_received');
+      return event?.metadata?.entity || run.metadata?.source || '-';
+    }
+    function setView(name) {
+      document.querySelectorAll('nav button').forEach(x => {
+        const active = x.dataset.view === name; x.classList.toggle('active', active); x.setAttribute('aria-current', active ? 'page' : 'false');
+      });
+      document.querySelectorAll('.view').forEach(x => x.classList.toggle('active', x.id === `view-${name}`));
+      if (name === 'change') loadWorkspaces();
+      if (name === 'runs') loadRuns();
+    }
+    async function loadRuns(selectedID = '') {
+      const root = byId('run-list'); root.replaceChildren(textNode('div', 'Loading...', 'hint form'));
+      try {
+        const result = await api('/api/v1/runs?limit=200'); root.replaceChildren();
+        const runs = result.runs || [];
+        if (!runs.length) {
+          root.append(textNode('div', 'No Runs have been recorded.', 'hint form'));
+          byId('run-detail').replaceChildren(textNode('div', 'Investigation Runs will appear here after an alert or audited chat completes.', 'hint'));
+          return;
+        }
+        for (const run of runs) {
+          const row = document.createElement('button'); row.type = 'button'; row.className = 'run-row'; row.dataset.runID = run.id;
+          const alert = run.metadata?.alert || run.source || 'Run';
+          const status = run.investigation?.finding_status || run.status;
+          const head = document.createElement('div'); head.className = 'run-row-head';
+          head.append(textNode('div', alert, 'run-row-title'), textNode('span', status, `run-status ${status}`));
+          row.append(head, textNode('div', `${new Date(run.started_at).toLocaleString()} · ${runEntity(run)}`, 'run-row-meta'));
+          row.addEventListener('click', () => openRun(run.id, true)); root.append(row);
+        }
+        const target = selectedID || state.runID || runs[0].id;
+        await openRun(target, false);
+      } catch (error) { root.replaceChildren(textNode('div', `Failed to load Runs: ${error.message}`, 'activity-item failed')); }
+    }
+    function addFact(root, label, value) {
+      const box = document.createElement('div'); box.className = 'fact'; box.append(textNode('div', label, 'fact-label'), textNode('div', String(value ?? '-'), 'fact-value')); root.append(box);
+    }
+    function addRunSection(root, title, value) {
+      const section = document.createElement('section'); section.className = 'run-section'; section.append(textNode('h3', title));
+      if (Array.isArray(value)) {
+        if (!value.length) section.append(textNode('div', 'None recorded.', 'hint'));
+        else { const list = document.createElement('ul'); value.forEach(item => list.append(textNode('li', item))); section.append(list); }
+      } else section.append(textNode('div', value || 'Not recorded.', value ? '' : 'hint'));
+      root.append(section);
+    }
+    async function openRun(id, updateHistory) {
+      const root = byId('run-detail'); root.replaceChildren(textNode('div', 'Loading...', 'hint'));
+      try {
+        const run = await api(`/api/v1/runs/${encodeURIComponent(id)}`); state.runID = id;
+        let job = null; let jobLoadError = '';
+        if (run.metadata?.job_id) {
+          try { job = await api(`/api/v1/investigation-jobs/${encodeURIComponent(run.metadata.job_id)}`); }
+          catch (error) { jobLoadError = error.message; }
+        }
+        document.querySelectorAll('.run-row').forEach(row => row.classList.toggle('active', row.dataset.runID === id));
+        if (updateHistory) history.pushState({ runID: id }, '', `/runs/${encodeURIComponent(id)}`);
+        root.replaceChildren();
+        const facts = document.createElement('div'); facts.className = 'facts';
+        const finished = run.completed_at ? new Date(run.completed_at) : null;
+        const duration = finished ? `${Math.max(0, finished - new Date(run.started_at))} ms` : 'running';
+        addFact(facts, 'Alert', run.metadata?.alert || run.source); addFact(facts, 'Status', run.investigation?.finding_status || run.status);
+        addFact(facts, 'Host / service', runEntity(run)); addFact(facts, 'Started', new Date(run.started_at).toLocaleString());
+        addFact(facts, 'Finished', finished ? finished.toLocaleString() : '-'); addFact(facts, 'Duration', duration);
+        addFact(facts, 'Run ID', run.id); addFact(facts, 'Job ID', run.metadata?.job_id || '-');
+        addFact(facts, 'Policy', 'Read-only diagnostics'); addFact(facts, 'Production writes', run.investigation?.production_writes ?? 0); root.append(facts);
+        if (run.status === 'failed') {
+          const failure = document.createElement('section'); failure.className = 'diagnostic';
+          failure.append(textNode('div', 'Investigation failed', 'diagnostic-title'));
+          failure.append(textNode('div', job?.error_detail || run.error || 'No failure detail was recorded.'));
+          const failureMeta = [`error: ${job?.error || run.error || 'unknown'}`];
+          if (job?.attempts) failureMeta.push(`attempts: ${job.attempts}`);
+          if (jobLoadError) failureMeta.push(`job details unavailable: ${jobLoadError}`);
+          failure.append(textNode('div', failureMeta.join(' · '), 'diagnostic-meta')); root.append(failure);
+        }
+        const investigation = run.investigation;
+        if (investigation) {
+          addRunSection(root, 'Summary', investigation.summary); addRunSection(root, 'Finding / hypothesis', investigation.hypothesis);
+          addRunSection(root, 'Impact', investigation.impact); addRunSection(root, 'Evidence', investigation.evidence || []);
+          addRunSection(root, 'Ruled out', investigation.ruled_out || []); addRunSection(root, 'Affected components', investigation.affected_components || []);
+          addRunSection(root, 'Recommended actions', investigation.recommended_actions || []);
+        } else if (run.status !== 'failed') {
+          addRunSection(root, 'Investigation result', run.status === 'running' ? 'Investigation is still running.' : 'No structured result was recorded.');
+        }
+        const timeline = document.createElement('section'); timeline.className = 'run-section'; timeline.append(textNode('h3', 'Timeline'));
+        for (const event of run.events || []) timeline.append(textNode('div', `${new Date(event.time).toLocaleTimeString()}  ${event.type}  ${event.status || ''}  ${JSON.stringify(event.metadata || {})}`, 'timeline-item'));
+        if (!(run.events || []).length) timeline.append(textNode('div', 'No timeline events.', 'hint')); root.append(timeline);
+        const raw = document.createElement('section'); raw.className = 'run-section'; raw.append(textNode('h3', 'Raw tool results'));
+        const tools = (run.events || []).filter(event => event.type === 'tool_call');
+        for (const event of tools) {
+          const details = document.createElement('details'); details.className = 'raw-tool';
+          details.append(textNode('summary', `${event.metadata?.tool || 'tool'} · ${event.status || 'unknown'} · ${event.metadata?.call_id || ''}`));
+          const pre = document.createElement('pre'); pre.textContent = JSON.stringify({ arguments: event.arguments ?? null, result: event.result ?? null }, null, 2); details.append(pre); raw.append(details);
+        }
+        if (!tools.length) raw.append(textNode('div', 'No tool calls were recorded.', 'hint')); root.append(raw);
+        if (run.status !== 'running') {
+          const follow = document.createElement('section'); follow.className = 'run-section'; follow.append(textNode('h3', 'Follow-up chat'));
+          const input = document.createElement('textarea'); input.id = 'run-followup-input'; input.placeholder = 'Ask about this investigation…';
+          const button = document.createElement('button'); button.type = 'button'; button.className = 'primary'; button.textContent = 'Ask'; button.addEventListener('click', () => sendRunFollowUp(id, button));
+          const actions = document.createElement('div'); actions.className = 'form-actions'; actions.append(textNode('span', 'Additional tool calls stay in this Run.', 'hint'), button);
+          const answer = document.createElement('div'); answer.id = 'run-followup-answer'; answer.className = 'content'; follow.append(input, actions, answer); root.append(follow);
+        }
+      } catch (error) { root.replaceChildren(textNode('div', `Failed to load Run: ${error.message}`, 'activity-item failed')); }
+    }
+    async function sendRunFollowUp(id, button) {
+      const input = byId('run-followup-input'); const message = input.value.trim(); if (!message) return;
+      const answer = byId('run-followup-answer'); setBusy(button, true); answer.replaceChildren(textNode('div', 'Investigating...', 'hint'));
+      try {
+        const result = await api(`/api/v1/runs/${encodeURIComponent(id)}/chat`, { method: 'POST', body: JSON.stringify({ message, debug: byId('debug').checked }) });
+        await openRun(id, false);
+        const refreshedAnswer = byId('run-followup-answer'); refreshedAnswer.replaceChildren(); renderMarkdown(refreshedAnswer, result.answer);
+      } catch (error) { answer.replaceChildren(textNode('div', `Error: ${error.message}`, 'error')); }
+      finally { setBusy(button, false); }
+    }
     async function runChange() {
 	  const button = byId('run-change'); const output = byId('change-result'); const approval = byId('change-approval');
 	  state.pendingApproval = null; approval.hidden = true; approval.replaceChildren();
@@ -492,17 +654,30 @@
 	  }
 	}
     document.querySelectorAll('nav button').forEach(button => button.addEventListener('click', () => {
-      document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x === button));
-      document.querySelectorAll('.view').forEach(x => x.classList.toggle('active', x.id === `view-${button.dataset.view}`));
-      if (button.dataset.view === 'change') loadWorkspaces();
+      if (button.dataset.view === 'runs') state.runID = null;
+      setView(button.dataset.view);
+      if (button.dataset.view === 'runs') history.pushState({}, '', '/runs');
+      else if (button.dataset.view === 'chat') history.pushState({}, '', '/');
     }));
     byId('send-chat').addEventListener('click', sendChat);
     byId('chat-input').addEventListener('keydown', event => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) sendChat(); });
     byId('run-change').addEventListener('click', runChange);
+    byId('refresh-runs').addEventListener('click', async event => {
+      setBusy(event.currentTarget, true);
+      try { await loadRuns(state.runID || ''); } finally { setBusy(event.currentTarget, false); }
+    });
     byId('api-key').addEventListener('change', loadWorkspaces);
+    byId('api-key').addEventListener('change', () => { if (byId('view-runs').classList.contains('active')) loadRuns(state.runID || ''); });
     byId('status').addEventListener('click', loadToolCatalog);
     byId('close-tools').addEventListener('click', () => byId('tools-dialog').close());
     byId('tools-dialog').addEventListener('click', event => { if (event.target === byId('tools-dialog')) byId('tools-dialog').close(); });
+    window.addEventListener('popstate', () => initializeRoute());
+    function initializeRoute() {
+      const match = location.pathname.match(/^\/runs\/([^/]+)$/);
+      if (location.pathname === '/runs' || match) { state.runID = match ? decodeURIComponent(match[1]) : null; setView('runs'); }
+      else setView('chat');
+    }
+    initializeRoute();
     fetch('/health').then(r => r.json()).then(data => { byId('status').textContent = `${data.model} · ${data.tools} tools`; byId('status').classList.add('ok'); }).catch(() => { byId('status').textContent = 'unavailable'; });
   </script>
 </body>

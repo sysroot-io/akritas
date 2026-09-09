@@ -73,6 +73,16 @@ func TestOpsServerRepeatedCLIFlagOverridesConfiguredList(t *testing.T) {
 	}
 }
 
+func TestNormalizeOpsPublicURL(t *testing.T) {
+	value, err := normalizeOpsPublicURL(" https://akritas.example/ops/ ")
+	if err != nil || value != "https://akritas.example/ops" {
+		t.Fatalf("value=%q err=%v", value, err)
+	}
+	if _, err := normalizeOpsPublicURL("javascript:alert(1)"); err == nil {
+		t.Fatal("unsafe public URL was accepted")
+	}
+}
+
 func TestLoadOpsServerConfigRejectsUnknownFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "akritas.json")
 	if err := os.WriteFile(path, []byte(`{"version":1,"unknown":true}`), 0o600); err != nil {
@@ -111,6 +121,9 @@ func TestApplyOpsServerEnvironmentMapsEveryOption(t *testing.T) {
 		"AKRITAS_RAG_INDEX":                   "/data/index.tgr",
 		"AKRITAS_MCP_CONFIG":                  "/etc/akritas/mcp.json",
 		"AKRITAS_NOTIFICATIONS_CONFIG":        "/etc/akritas/notifications.json",
+		"AKRITAS_ALERT_SOURCES_CONFIG":        "/etc/akritas/alerts.json",
+		"AKRITAS_ALERT_STORE":                 "/data/alerts.jsonl",
+		"AKRITAS_PUBLIC_URL":                  "https://akritas.example",
 		"AKRITAS_WORKSPACE_CONFIG":            "/etc/akritas/workspaces.json",
 		"AKRITAS_AUDIT_LOG":                   "/data/audit.jsonl",
 		"AKRITAS_SEARCH_TOP_K":                "7",
@@ -148,6 +161,9 @@ func TestApplyOpsServerEnvironmentMapsEveryOption(t *testing.T) {
 		RAGIndexPath:              "/data/index.tgr",
 		MCPConfigPath:             "/etc/akritas/mcp.json",
 		NotificationsConfigPath:   "/etc/akritas/notifications.json",
+		AlertSourcesConfigPath:    "/etc/akritas/alerts.json",
+		AlertStorePath:            "/data/alerts.jsonl",
+		PublicURL:                 "https://akritas.example",
 		WorkspaceConfigPath:       "/etc/akritas/workspaces.json",
 		AuditLogPath:              "/data/audit.jsonl",
 		SearchTopK:                7,

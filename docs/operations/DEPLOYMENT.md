@@ -40,9 +40,12 @@ services:
     environment:
       AKRITAS_CONFIG: /etc/akritas/server.json
       AKRITAS_NOTIFICATIONS_CONFIG: /etc/akritas/notifications.json
+      AKRITAS_ALERT_SOURCES_CONFIG: /etc/akritas/alerts.json
+      AKRITAS_PUBLIC_URL: https://akritas.example
     volumes:
       - ./configs/akritas/server.local.json:/etc/akritas/server.json:ro
       - ./configs/akritas/notifications.local.json:/etc/akritas/notifications.json:ro
+      - ./configs/akritas/alerts.local.json:/etc/akritas/alerts.json:ro
       - ./data/indexes:/var/lib/akritas/indexes:ro
       - ./configs/akritas/workspaces.local.json:/etc/akritas/workspaces.json:ro
       - /srv/repos/backend:/workspaces/backend:rw
@@ -51,32 +54,33 @@ services:
 The mounted `server.local.json` should keep `address` at `0.0.0.0:8090` and can
 set `rag_index` to `/var/lib/akritas/indexes/operations.tgr`,
 `workspace_config` to `/etc/akritas/workspaces.json`, and `audit_log` to
-`/var/lib/akritas/audit/akritas.jsonl`. Start from
+`/var/lib/akritas/audit/akritas.jsonl` and `alert_store` to
+`/var/lib/akritas/audit/alerts.jsonl`. Start from
 `configs/akritas/server.example.json`. Environment variables can override any
 field and explicit CLI flags remain the highest-precedence option.
 
-Секреты исходящих webhook, Telegram и Mattermost не помещайте в mounted JSON.
-Поля `*_env` в notification config должны ссылаться на environment variables,
-которые container runtime получает из secret store. Ограничьте egress до
-настроенных hosts. Встроенная доставка best effort и без persistent retry; для
-гарантированной доставки направляйте generic webhook в durable queue.
+Do not place outbound webhook, Telegram, or Mattermost secrets in mounted JSON.
+The `*_env` fields in notification configuration must reference environment
+variables supplied by the container runtime from a secret store. Restrict
+egress to configured hosts. Built-in delivery is best effort without persistent
+retry; route the generic webhook to a durable queue when delivery guarantees
+are required.
 
-Telegram polling требует только исходящий HTTPS-доступ к `api.telegram.org` и
-не требует public ingress route. Убедитесь, что для этого bot token не
-зарегистрирован webhook. Для Telegram webhook mode и Mattermost reverse proxy
-должен отдельно разрешить ingress routes без подстановки общего Akritas Bearer
-token:
+Telegram polling needs only outbound HTTPS access to `api.telegram.org` and no
+public ingress route. Ensure that no webhook is registered for the same bot
+token. For Telegram webhook mode and Mattermost, the reverse proxy must allow
+the ingress routes without injecting the common Akritas Bearer token:
 
 ```text
 /api/v1/bots/telegram/*/webhook
 /api/v1/bots/mattermost/*/webhook
 ```
 
-Сохраните Telegram secret header и Mattermost request body, ограничьте request
-body 64 KiB, включите rate limiting и не добавляйте provider secrets в access
-logs. Эти endpoints выполняют собственную provider authentication и allowlists.
-Остальные `/api/v1/*` по-прежнему должны требовать `AKRITAS_API_KEY` на уровне
-Akritas и, при необходимости, reverse proxy.
+Preserve the Telegram secret header and Mattermost request body, limit request
+bodies to 64 KiB, enable rate limiting, and omit provider secrets from access
+logs. These endpoints perform their own provider authentication and allowlist
+checks. Other `/api/v1/*` routes must still require `AKRITAS_API_KEY` in Akritas
+and, where applicable, at the reverse proxy.
 
 Container workspace roots in the catalog must use their mounted paths, such as
 `/workspaces/backend`. Use `:ro` for diagnostic-only workspaces. Change apply

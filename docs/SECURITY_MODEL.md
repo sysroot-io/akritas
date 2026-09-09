@@ -13,7 +13,7 @@ the operator-selected global system-instructions file and operational skills,
 the operating-system account, explicitly configured validator executables, the
 reverse proxy or local network boundary, and the audit-storage directory.
 Upstream models, MCP servers, repository content, RAG documents, HTTP payloads,
-and Alertmanager fields are untrusted.
+and all provider alert fields are untrusted.
 
 ## Enforcement Points
 
@@ -45,15 +45,19 @@ and Alertmanager fields are untrusted.
 12. The optional service configuration uses a versioned strict JSON schema with
     bounded input. It contains credential variable names, not secret values;
     actual keys remain in the process environment.
-13. Исходящие уведомления используют отдельную строгую конфигурацию. URL и
-    адресаты принадлежат оператору и никогда не принимаются из alert или ответа
-    модели. Токены и HMAC-секреты читаются из именованных переменных окружения.
-14. Bot ingress не использует общий API key. Telegram polling аутентифицируется
-    bot token при исходящем TLS-соединении с Bot API; Telegram webhook
-    проверяется по `X-Telegram-Bot-Api-Secret-Token`, Mattermost — по token
-    outgoing webhook/slash command. После этого host применяет allowlists
-    conversation и user IDs, подавляет duplicate event IDs и допускает только
-    bounded text.
+13. Outbound notifications use a separate strict configuration. URLs and
+    recipients belong to the operator and are never accepted from an alert or
+    model response. Tokens and HMAC secrets come from named environment
+    variables.
+14. Bot ingress does not use the common API key. Telegram polling authenticates
+    with the bot token over an outbound TLS connection to the Bot API; Telegram
+    webhooks verify `X-Telegram-Bot-Api-Secret-Token`, and Mattermost verifies
+    the outgoing-webhook or slash-command token. The host then applies
+    conversation and user-ID allowlists, suppresses duplicate event IDs, and
+    accepts only bounded text.
+15. Alert ingress uses a strict source registry. Each source selects one fixed
+    adapter and explicit authentication; normalized events are durably
+    deduplicated and correlated before asynchronous investigation.
 
 ## Permission Model
 
@@ -77,8 +81,9 @@ workspace authorization is not implemented.
 ## Data Handling
 
 - API keys and authorization headers must never enter audit events.
-- Tool arguments and results are omitted from ordinary audit events; only
-  bounded metadata and status are retained.
+- Tool arguments and raw results are retained in authenticated Run detail as
+  host-owned evidence. Protect and expire the audit volume as operationally
+  sensitive data. Credentials must never be supplied as model tool arguments.
 - The bundled VictoriaMetrics MCP adapter uses an operator-configured endpoint,
   tenant headers, and credential environment variables. Model tool arguments
   cannot select a host, set credentials, or invoke write APIs. HTTP duration and
@@ -104,16 +109,16 @@ workspace authorization is not implemented.
 - Skill files are trusted configuration. A malicious skill can misguide model
   reasoning, but cannot add tools or bypass host-side authorization, argument
   validation, budgets, and audit controls.
-- Универсальный webhook получает полный структурированный результат и поэтому
-  должен считаться доверенным получателем операционных данных. Для проверки
-  источника доступны Bearer-токен и подпись `HMAC-SHA256`; Telegram и Mattermost
-  получают сокращённое представление без raw tool payload. Ответные тела
-  получателей и секреты не пишутся в аудит или server log.
-- Bot conversation history хранится только в bounded process memory и исчезает
-  при restart. Успешно доставленные пары user/assistant ограничиваются числом
-  сообщений, bytes, TTL и общим количеством sessions. Telegram bot messages
-  игнорируются по `is_bot`; Mattermost inbound требует user allowlist, чтобы
-  REST reply bot не создал feedback loop.
+- The generic webhook receives the full structured result and must be treated
+  as a trusted recipient of operational data. Bearer authentication and an
+  `HMAC-SHA256` signature are available; Telegram and Mattermost receive a
+  compact representation without raw tool payloads. Receiver response bodies
+  and secrets are not written to audit or server logs.
+- Bot conversation history exists only in bounded process memory and disappears
+  on restart. Successfully delivered user/assistant pairs are limited by
+  message count, bytes, TTL, and total sessions. Telegram bot messages are
+  ignored through `is_bot`; Mattermost ingress requires a user allowlist to
+  prevent the REST reply bot from creating a feedback loop.
 
 ## Validator Boundary
 
@@ -147,9 +152,9 @@ for executable validators near production.
 - VictoriaMetrics or an intermediary can place sensitive data in an error
   response. Operators who enable MCP debug logging must protect and expire the
   resulting stderr logs.
-- Скомпрометированный настроенный получатель уведомлений видит отправленные ему
-  данные инцидента. Однократная best-effort доставка не имеет persistent outbox:
-  кратковременная ошибка канала может привести к пропущенному уведомлению.
-- Скомпрометированный bot ingress secret в пределах разрешённого chat/channel
-  позволяет ставить запросы в очередь от allowlisted identity. Provider IDs не
-  являются cryptographic identity без валидного provider secret.
+- A compromised configured notification receiver can read incident data sent to
+  it. One-shot best-effort delivery has no persistent outbox, so a temporary
+  channel failure can lose a notification.
+- A compromised bot ingress secret for an allowed chat or channel can enqueue
+  requests as an allowlisted identity. Provider IDs are not cryptographic
+  identities without a valid provider secret.

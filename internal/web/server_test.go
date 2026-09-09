@@ -16,6 +16,7 @@ import (
 	"time"
 	"unicode"
 
+	"akritas/internal/alerts"
 	"akritas/internal/audit"
 	"akritas/internal/investigation"
 	"akritas/internal/notifications"
@@ -34,6 +35,9 @@ func TestRunAuditEndpointsRequireAuthenticationAndReturnPersistedRuns(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := store.AddToolEvent(run.ID, "succeeded", map[string]string{"tool": "test.lookup", "call_id": "call_1"}, json.RawMessage(`{"host":"pg01"}`), json.RawMessage(`{"output":{"cpu":95},"marker":"detail-only-raw"}`)); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.FinishRun(run.ID, audit.RunSucceeded, "", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +52,7 @@ func TestRunAuditEndpointsRequireAuthenticationAndReturnPersistedRuns(t *testing
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
 	server.handler().ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), run.ID) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), run.ID) || strings.Contains(response.Body.String(), "detail-only-raw") {
 		t.Fatalf("list status=%d body=%s", response.Code, response.Body.String())
 	}
 
@@ -56,7 +60,7 @@ func TestRunAuditEndpointsRequireAuthenticationAndReturnPersistedRuns(t *testing
 	request.Header.Set("Authorization", "Bearer secret")
 	response = httptest.NewRecorder()
 	server.handler().ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"status":"succeeded"`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"status":"succeeded"`) || !strings.Contains(response.Body.String(), "detail-only-raw") {
 		t.Fatalf("get status=%d body=%s", response.Code, response.Body.String())
 	}
 }
@@ -106,6 +110,14 @@ func TestOpsWebIncludesFullProposalDiagnostics(t *testing.T) {
 		"Show the complete structured proposal",
 		"Download proposal.json",
 		"downloadTextFile",
+		"Investigation Runs",
+		"Raw tool results",
+		"Follow-up chat",
+		"Production writes",
+		"refresh-runs",
+		"Investigation failed",
+		"/api/v1/investigation-jobs/",
+		"error_detail",
 	} {
 		if !strings.Contains(content, expected) {
 			t.Fatalf("Ops Web UI is missing %q", expected)
@@ -238,7 +250,7 @@ func TestOpsServerAcceptsAlertmanagerWebhook(t *testing.T) {
 						"id": "result_1", "type": "function",
 						"function": map[string]any{
 							"name":      input.Tools[0].Function.Name,
-							"arguments": `{"finding_status":"suspected","actionability":"requires_human","confidence":"low","summary":"High CPU requires diagnostic evidence.","evidence":[],"affected_components":["api-01"],"recommended_actions":["Collect CPU diagnostics."]}`,
+							"arguments": `{"finding_status":"suspected","actionability":"requires_human","confidence":"low","summary":"High CPU requires diagnostic evidence.","impact":"CPU saturation may affect request latency.","evidence":[],"ruled_out":[],"affected_components":["api-01"],"recommended_actions":["Collect CPU diagnostics."],"production_writes":0}`,
 						},
 					},
 					}}, "finish_reason": "tool_calls"}},
@@ -265,6 +277,17 @@ func TestOpsServerAcceptsAlertmanagerWebhook(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = auditStore.Close() })
 	server.SetAuditStore(auditStore)
+	alertStore, err := alerts.OpenStore(filepath.Join(t.TempDir(), "alerts.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		server.CloseAlertWorker()
+		_ = alertStore.Close()
+	})
+	if err := server.SetAlertRuntime(nil, alertStore); err != nil {
+		t.Fatal(err)
+	}
 	notificationConfig := filepath.Join(t.TempDir(), "notifications.json")
 	if err := os.WriteFile(notificationConfig, []byte(fmt.Sprintf(`{"version":1,"receivers":[{"name":"test","type":"webhook","url":%q}]}`, notificationServer.URL)), 0o600); err != nil {
 		t.Fatal(err)
@@ -288,25 +311,34 @@ func TestOpsServerAcceptsAlertmanagerWebhook(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
 	server.handler().ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
+	if response.Code != http.StatusAccepted {
 		t.Fatalf("Alertmanager status=%d body=%s", response.Code, response.Body.String())
 	}
-	var output opsAlertmanagerAPIResponse
+	var output opsAlertIngestionResponse
 	if err := json.Unmarshal(response.Body.Bytes(), &output); err != nil {
 		t.Fatal(err)
 	}
-	if !output.Accepted || output.Status != "firing" || output.GroupKey == "" ||
-		!strings.Contains(output.Answer, "high-cpu") || output.Activity == nil ||
-		output.Investigation.FindingStatus != investigation.FindingSuspected ||
-		output.Budget.Usage.Iterations != 2 {
+	if !output.Accepted || len(output.Events) != 1 || output.Events[0].JobID == "" {
 		t.Fatalf("unexpected Alertmanager response: %+v", output)
 	}
-	if notificationCalls != 1 || len(output.Notifications) != 1 || output.Notifications[0].Status != "delivered" {
-		t.Fatalf("notification_calls=%d deliveries=%+v", notificationCalls, output.Notifications)
+	jobContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	job, err := alertStore.WaitJob(jobContext, output.Events[0].JobID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	stored, exists := auditStore.Get(output.RunID)
+	if job.Status != alerts.JobSucceeded || job.RunID == "" {
+		t.Fatalf("unexpected investigation job: %+v", job)
+	}
+	if notificationCalls != 1 {
+		t.Fatalf("notification_calls=%d", notificationCalls)
+	}
+	stored, exists := auditStore.Get(job.RunID)
 	if !exists {
-		t.Fatalf("audit Run %q was not stored", output.RunID)
+		t.Fatalf("audit Run %q was not stored", job.RunID)
+	}
+	if stored.Investigation == nil || stored.Investigation.FindingStatus != investigation.FindingSuspected {
+		t.Fatalf("unexpected investigation: %+v", stored.Investigation)
 	}
 	foundDeliveryEvent := false
 	for _, event := range stored.Events {

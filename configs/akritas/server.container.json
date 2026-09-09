@@ -2,5 +2,6 @@
   "version": 1,
   "address": "0.0.0.0:8090",
   "base_url": "http://host.docker.internal:8080/v1",
-  "audit_log": "/var/lib/akritas/audit/akritas.jsonl"
+  "audit_log": "/var/lib/akritas/audit/akritas.jsonl",
+  "alert_store": "/var/lib/akritas/audit/alerts.jsonl"
 }

@@ -17,9 +17,11 @@ const (
 type FindingStatus string
 
 const (
-	FindingConfirmed FindingStatus = "confirmed"
-	FindingSuspected FindingStatus = "suspected"
-	FindingUnknown   FindingStatus = "unknown"
+	FindingConfirmed    FindingStatus = "confirmed"
+	FindingSuspected    FindingStatus = "suspected"
+	FindingInconclusive FindingStatus = "inconclusive"
+	// FindingUnknown is retained for previously persisted version 1 Runs.
+	FindingUnknown FindingStatus = "unknown"
 )
 
 type Actionability string
@@ -44,9 +46,12 @@ type Result struct {
 	Confidence         Confidence    `json:"confidence"`
 	Summary            string        `json:"summary"`
 	Hypothesis         string        `json:"hypothesis,omitempty"`
+	Impact             string        `json:"impact,omitempty"`
 	Evidence           []string      `json:"evidence"`
+	RuledOut           []string      `json:"ruled_out"`
 	AffectedComponents []string      `json:"affected_components"`
 	RecommendedActions []string      `json:"recommended_actions"`
+	ProductionWrites   int           `json:"production_writes"`
 }
 
 var evidenceReferencePattern = regexp.MustCompile(`^(tool-call|context|event|artifact):[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
@@ -69,11 +74,20 @@ func (result Result) Validate(availableEvidence map[string]struct{}) error {
 	if err := validateText("hypothesis", result.Hypothesis, maximumHypothesisRunes, false); err != nil {
 		return err
 	}
+	if err := validateText("impact", result.Impact, maximumSummaryRunes, false); err != nil {
+		return err
+	}
 	if err := validateList("evidence", result.Evidence, maximumListItems, maximumItemRunes); err != nil {
 		return err
 	}
 	if err := validateList("affected_components", result.AffectedComponents, maximumListItems, maximumItemRunes); err != nil {
 		return err
+	}
+	if err := validateList("ruled_out", result.RuledOut, maximumListItems, maximumItemRunes); err != nil {
+		return err
+	}
+	if result.ProductionWrites != 0 {
+		return fmt.Errorf("production_writes must be zero")
 	}
 	if err := validateList("recommended_actions", result.RecommendedActions, maximumListItems, maximumItemRunes); err != nil {
 		return err
@@ -92,14 +106,16 @@ func (result Result) Validate(availableEvidence map[string]struct{}) error {
 func (result Result) Normalized() Result {
 	result.Summary = strings.TrimSpace(result.Summary)
 	result.Hypothesis = strings.TrimSpace(result.Hypothesis)
+	result.Impact = strings.TrimSpace(result.Impact)
 	result.Evidence = normalizedList(result.Evidence)
+	result.RuledOut = normalizedList(result.RuledOut)
 	result.AffectedComponents = normalizedList(result.AffectedComponents)
 	result.RecommendedActions = normalizedList(result.RecommendedActions)
 	return result
 }
 
 func validFindingStatus(value FindingStatus) bool {
-	return value == FindingConfirmed || value == FindingSuspected || value == FindingUnknown
+	return value == FindingConfirmed || value == FindingSuspected || value == FindingInconclusive || value == FindingUnknown
 }
 
 func validActionability(value Actionability) bool {

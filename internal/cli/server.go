@@ -34,6 +34,9 @@ func runOpsServer(arguments []string) {
 	ragIndexPath := flags.String("rag-index", options.RAGIndexPath, "local RAG index; empty disables RAG")
 	mcpConfigPath := flags.String("mcp-config", options.MCPConfigPath, "MCP configuration; only authorized read tools are exposed")
 	notificationsConfigPath := flags.String("notifications-config", options.NotificationsConfigPath, "incident notification and bot adapter configuration; empty disables both")
+	alertSourcesConfigPath := flags.String("alert-sources-config", options.AlertSourcesConfigPath, "provider alert source configuration; empty disables provider-specific webhook routes")
+	alertStorePath := flags.String("alert-store", options.AlertStorePath, "append-only JSONL alert, incident and investigation-job store; empty disables alert ingestion")
+	publicURL := flags.String("public-url", options.PublicURL, "externally reachable Akritas base URL used in notification links")
 	workspaceConfigPath := flags.String("workspace-config", options.WorkspaceConfigPath, "strict JSON workspace catalog; roots are relative to the config file")
 	auditLogPath := flags.String("audit-log", options.AuditLogPath, "append-only JSONL run and audit log; empty disables persistence")
 	searchTopK := flags.Int("search-top-k", options.SearchTopK, "default and maximum RAG results")
@@ -63,7 +66,14 @@ func runOpsServer(arguments []string) {
 		*temperature < 0 || *requestTimeout <= 0 {
 		panic("serve requires valid addresses, names and generation limits")
 	}
+	if strings.TrimSpace(*alertSourcesConfigPath) != "" && strings.TrimSpace(*alertStorePath) == "" {
+		panic("serve requires -alert-store when -alert-sources-config is enabled")
+	}
 	normalizedResponseLanguage, err := normalizeResponseLanguage(*responseLanguage)
+	if err != nil {
+		panic(err)
+	}
+	normalizedPublicURL, err := normalizeOpsPublicURL(*publicURL)
 	if err != nil {
 		panic(err)
 	}
@@ -170,6 +180,13 @@ func runOpsServer(arguments []string) {
 			panic(err)
 		}
 	}
+	var alertRegistry *AlertRegistry
+	if strings.TrimSpace(*alertSourcesConfigPath) != "" {
+		alertRegistry, err = LoadAlertRegistry(*alertSourcesConfigPath, os.LookupEnv)
+		if err != nil {
+			panic(err)
+		}
+	}
 
 	upstreamAPIKey := ""
 	if strings.TrimSpace(*upstreamAPIKeyEnvironment) != "" {
@@ -212,6 +229,7 @@ func runOpsServer(arguments []string) {
 	server.SetValidatorProfiles(commonValidatorProfiles)
 	server.SetSkillCatalog(skillCatalog)
 	server.SetNotificationDispatcher(notificationDispatcher)
+	server.SetPublicURL(normalizedPublicURL)
 	defer server.CloseBotGateway()
 	if strings.TrimSpace(*auditLogPath) != "" {
 		auditStore, err := audit.Open(*auditLogPath)
@@ -225,6 +243,21 @@ func runOpsServer(arguments []string) {
 		}()
 		server.SetAuditStore(auditStore)
 	}
+	if strings.TrimSpace(*alertStorePath) != "" {
+		alertStore, err := OpenAlertStore(*alertStorePath)
+		if err != nil {
+			panic(err)
+		}
+		defer func() {
+			if err := alertStore.Close(); err != nil {
+				fmt.Fprintln(os.Stderr, "close alert store:", err)
+			}
+		}()
+		if err := server.SetAlertRuntime(alertRegistry, alertStore); err != nil {
+			panic(err)
+		}
+		defer server.CloseAlertWorker()
+	}
 	httpServer := &http.Server{
 		Addr: *address, Handler: server.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -233,9 +266,9 @@ func runOpsServer(arguments []string) {
 		IdleTimeout:       2 * time.Minute,
 	}
 	fmt.Printf(
-		"Akritas Web UI: http://%s model=%s upstream=%s config=%s response_language=%s system_instructions=%s skills_dir=%s skills=%d notifications=%d bots=%d tools=%d workspaces=%d approved_changes=true\n",
+		"Akritas Web UI: http://%s model=%s upstream=%s config=%s response_language=%s system_instructions=%s skills_dir=%s skills=%d alert_sources=%d notifications=%d bots=%d tools=%d workspaces=%d approved_changes=true\n",
 		*address, *modelID, client.Model, *configPath, normalizedResponseLanguage, *systemInstructionsPath,
-		*skillsDirectory, skillCatalog.Len(), notificationDispatcher.Len(), notificationDispatcher.BotReceiverCount(), len(registry.Definitions()), len(workspaces),
+		*skillsDirectory, skillCatalog.Len(), alertRegistry.Len(), notificationDispatcher.Len(), notificationDispatcher.BotReceiverCount(), len(registry.Definitions()), len(workspaces),
 	)
 	if ignoredMCPTools > 0 {
 		fmt.Printf("Ignored non-read MCP tools: %d\n", ignoredMCPTools)

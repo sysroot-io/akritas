@@ -30,8 +30,121 @@ jobs:
       - name: Test
         run: go test ./...
 
+      - name: Vet
+        run: go vet ./...
+
       - name: Build
         run: go build -o /tmp/akritas ./cmd/akritas
+
+  race:
+    name: Race detector
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.mod
+
+      - name: Test with race detector
+        run: go test -race ./...
+
+  smoke:
+    name: Smoke test compiled server
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.mod
+
+      - name: Exercise server and alert lifecycle
+        run: go test -tags=smoke -v ./tests/smoke
+
+  container:
+    name: Build and smoke test container
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.mod
+
+      - name: Build production image
+        run: docker build --tag akritas:ci .
+
+      - name: Validate Compose configuration
+        env:
+          AKRITAS_API_KEY: container-smoke-key
+        run: docker compose config --quiet
+
+      - name: Exercise container startup and API
+        shell: bash
+        run: |
+          set -euo pipefail
+          go build -o /tmp/akritas-smoke-upstream ./tests/smoke/upstream
+          cleanup() {
+            docker rm --force akritas-smoke >/dev/null 2>&1 || true
+            docker rm --force akritas-smoke-upstream >/dev/null 2>&1 || true
+            docker network rm akritas-smoke >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker network create akritas-smoke
+          docker run --detach --name akritas-smoke-upstream \
+            --network akritas-smoke \
+            --volume /tmp/akritas-smoke-upstream:/usr/local/bin/akritas-smoke-upstream:ro \
+            --entrypoint /usr/local/bin/akritas-smoke-upstream \
+            akritas:ci -address 0.0.0.0:8081
+          for attempt in {1..30}; do
+            if docker exec akritas-smoke-upstream \
+              curl --fail --silent http://127.0.0.1:8081/v1/models >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              docker logs akritas-smoke-upstream
+              exit 1
+            fi
+            sleep 1
+          done
+          docker run --detach --name akritas-smoke \
+            --network akritas-smoke \
+            --read-only \
+            --tmpfs /tmp:mode=0700,uid=10001,gid=10001 \
+            --tmpfs /var/lib/akritas/audit:mode=0700,uid=10001,gid=10001 \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --env AKRITAS_API_KEY=container-smoke-key \
+            --env AKRITAS_BASE_URL=http://akritas-smoke-upstream:8081/v1 \
+            --publish 127.0.0.1:18090:8090 \
+            akritas:ci
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:18090/health >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              docker logs akritas-smoke
+              exit 1
+            fi
+            sleep 1
+          done
+          curl --fail --silent \
+            -H 'Authorization: Bearer container-smoke-key' \
+            http://127.0.0.1:18090/v1/models \
+            | grep --quiet '"id":"akritas"'
 
   security:
     name: Vulnerability and static security scan

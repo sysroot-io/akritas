@@ -1,14 +1,13 @@
 package web
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"time"
 
+	"akritas/internal/alerts"
 	"akritas/internal/investigation"
 	"akritas/internal/notifications"
 	"akritas/internal/runbudget"
@@ -57,63 +56,23 @@ type opsAlertmanagerAPIResponse struct {
 }
 
 func (server *opsServer) handleAlertmanagerWebhook(writer http.ResponseWriter, request *http.Request) {
-	var webhook opsAlertmanagerWebhook
-	if err := decodeOpsRequest(writer, request, &webhook); err != nil {
-		writeOpsError(writer, http.StatusBadRequest, err)
-		return
-	}
-	if err := validateOpsAlertmanagerWebhook(webhook); err != nil {
-		writeOpsError(writer, http.StatusBadRequest, err)
-		return
-	}
-	prompt, err := buildOpsAlertmanagerPrompt(webhook)
+	body, err := readOpsAlertBody(writer, request)
 	if err != nil {
 		writeOpsError(writer, http.StatusBadRequest, err)
 		return
 	}
-	ctx, cancel := context.WithTimeout(request.Context(), server.requestTimeout)
-	defer cancel()
-	auditRun := server.beginAuditRun("alertmanager", "", map[string]string{
-		"status": webhook.Status, "receiver": webhook.Receiver,
-	})
-	defer auditRun.failIfRunning("request_incomplete")
-	result, err := server.completeChat(ctx, []openAIChatMessage{{Role: "user", Content: prompt}}, server.defaultMaxTokens, server.defaultTemp)
+	adapter, err := alerts.NewAdapter(alerts.AdapterAlertmanager)
 	if err != nil {
-		writeOpsError(writer, http.StatusBadGateway, err)
+		writeOpsError(writer, http.StatusInternalServerError, err)
 		return
 	}
-	auditRun.addToolEvents(result)
-	investigationResult, err := server.structureInvestigationResult(ctx, result)
+	receivedAt := time.Now().UTC()
+	events, err := alerts.DecodeWithAdapter(adapter, alerts.AdapterAlertmanager, "alertmanager", body, receivedAt)
 	if err != nil {
-		writeOpsError(writer, http.StatusBadGateway, err)
+		writeOpsError(writer, http.StatusBadRequest, err)
 		return
 	}
-	auditRun.setInvestigationResult(investigationResult)
-	auditRun.addEvent("investigation_result", "accepted", map[string]string{
-		"finding_status": string(investigationResult.FindingStatus),
-		"actionability":  string(investigationResult.Actionability),
-		"confidence":     string(investigationResult.Confidence),
-		"evidence_count": fmt.Sprintf("%d", len(investigationResult.Evidence)),
-	})
-	activity := buildOpsToolActivity(result, false)
-	capabilityGaps := buildOpsCapabilityGaps(result)
-	deliveries := server.deliverIncidentNotifications(ctx, auditRun.id(), webhook, result, investigationResult, activity, capabilityGaps)
-	auditRun.addNotificationEvents(deliveries)
-	usageMetadata := opsRunUsageMetadata(result)
-	usageMetadata["alerts"] = fmt.Sprintf("%d", len(webhook.Alerts))
-	auditRun.succeed(usageMetadata)
-	log.Printf(
-		"level=info component=akritas source=alertmanager receiver=%q status=%q group_key=%q alerts=%d truncated_alerts=%d",
-		webhook.Receiver, webhook.Status, webhook.GroupKey, len(webhook.Alerts), webhook.TruncatedAlerts,
-	)
-	writeJSON(writer, http.StatusOK, opsAlertmanagerAPIResponse{
-		RunID: auditRun.id(), Accepted: true, Model: server.modelID, Status: webhook.Status, GroupKey: webhook.GroupKey,
-		Answer: result.Answer, Skills: result.Skills, Activity: activity,
-		CapabilityGaps: capabilityGaps,
-		Investigation:  investigationResult,
-		Notifications:  deliveries,
-		Budget:         result.Tracker.Snapshot(),
-	})
+	server.ingestAlertEvents(writer, "alertmanager", body, events, receivedAt)
 }
 
 func validateOpsAlertmanagerWebhook(webhook opsAlertmanagerWebhook) error {

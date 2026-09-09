@@ -3,8 +3,10 @@ package web
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
+	"akritas/internal/alerts"
 	"akritas/internal/audit"
 	"akritas/internal/clients/openai"
 	"akritas/internal/mcp"
@@ -41,6 +43,18 @@ func (server *opsServer) SetValidatorProfiles(profiles []string) {
 
 func (server *opsServer) SetAuditStore(store *audit.Store) {
 	server.auditStore = store
+}
+
+func (server *opsServer) SetAlertRuntime(registry *alerts.Registry, store *alerts.Store) error {
+	return server.setAlertRuntime(registry, store)
+}
+
+func (server *opsServer) CloseAlertWorker() {
+	server.closeAlertWorker()
+}
+
+func (server *opsServer) SetPublicURL(value string) {
+	server.publicURL = strings.TrimRight(strings.TrimSpace(value), "/")
 }
 
 func (server *opsServer) SetSkillCatalog(catalog *skills.Catalog) {

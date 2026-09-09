@@ -24,15 +24,20 @@ export AKRITAS_API_KEY=demo-only-change-me
 In another terminal:
 
 ```bash
-curl --fail-with-body -X POST http://127.0.0.1:8090/api/v1/alertmanager/webhook \
+response=$(curl --fail-with-body -X POST http://127.0.0.1:8090/api/v1/alertmanager/webhook \
   -H 'Authorization: Bearer demo-only-change-me' \
   -H 'Content-Type: application/json' \
-  --data-binary @demos/incident-response/alert.json
+  --data-binary @demos/incident-response/alert.json)
+echo "$response" | jq .
+
+job_id=$(echo "$response" | jq -r '.events[0].job_id')
 curl --fail -H 'Authorization: Bearer demo-only-change-me' \
-  http://127.0.0.1:8090/api/v1/runs
+  "http://127.0.0.1:8090/api/v1/investigation-jobs/${job_id}"
 ```
 
-Expected evidence: the answer cites document ID `high-cpu.md`, unavailable diagnostics are
-listed as capability gaps, no write tool is exposed, and the run endpoint shows
-a succeeded `alertmanager` run. Results depend on the configured upstream model;
-the host-side safety assertions do not.
+The webhook returns HTTP 202 after durable acceptance. Poll the job endpoint
+until it reports `succeeded`, then open its `run_id` at `/runs/{id}` or
+`GET /api/v1/runs/{id}`. Expected evidence: the Run references document ID
+`high-cpu.md`, unavailable diagnostics are listed as capability gaps, no write
+tool is exposed, and the Run source is `alert:alertmanager`. Results depend on
+the configured upstream model; the host-side safety assertions do not.

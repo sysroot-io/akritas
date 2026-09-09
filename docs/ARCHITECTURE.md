@@ -6,7 +6,7 @@ Akritas is responsible for orchestration and the safety of operational
 workflows:
 
 ```text
-person / Alertmanager / OpenAI client
+person / monitoring source / OpenAI client
                  |
                  v
              Akritas host <---------> bot gateways / notifications
@@ -55,10 +55,10 @@ environment and are not fields in the JSON schema.
 
 - `OpenAI /v1` separates orchestration from a specific model.
 - MCP separates the reasoning loop from log, metrics, inventory, and server systems.
-- The Alertmanager webhook separates the event source from incident processing.
+- The alert adapter registry separates provider payloads from canonical incident processing.
 - The workspace catalog separates the change pipeline from Git repository locations.
 - Validator profiles separate the model proposal from actual project verification.
-- Конфигурация уведомлений отделяет результат расследования от универсального webhook, Telegram и Mattermost.
+- Notification configuration separates investigation results from the generic webhook, Telegram, and Mattermost.
 
 As the infrastructure grows, individual functions can be delegated to Rundeck,
 StackStorm, Keep, or internal services. The preferred integration is an MCP
@@ -80,6 +80,7 @@ internal/victoriametrics/     bounded read-only VictoriaMetrics MCP tools
 internal/change/              discovery, proposal, validators, and approval
 internal/clients/openai/      OpenAI-compatible API client and tool loop
 internal/audit/               durable run lifecycle and security event log
+internal/alerts/              canonical alerts, provider adapters, correlation, jobs
 internal/notifications/       incident delivery and bidirectional bot adapters
 ```
 
@@ -106,38 +107,39 @@ possible only after one-time approval and another byte-for-byte verification of
 the original files.
 
 Every accepted execution receives a random run ID when audit storage is enabled.
-The append-only JSONL store records lifecycle and bounded security events. It
-does not record prompts, model answers, tool arguments, tool results, approval
-capabilities, or credentials.
+The append-only JSONL store records lifecycle and bounded security events.
+Authenticated Run detail includes host-recorded tool arguments and raw results;
+credentials, approval capabilities, prompts, and model transcripts are not
+stored.
 
-Chat and Alertmanager reasoning run under a host-owned budget that spans model
+Chat and alert reasoning run under a host-owned budget that spans model
 iterations, tool calls, context, tool results, model output, and duration. The
-Alertmanager flow converts the free-form answer into a strict
+alert investigation flow converts the free-form answer into a strict
 `InvestigationResult`. The host validates every evidence reference against
 actual tool-call IDs before accepting the result. `confidence` is descriptive
 and cannot authorize a tool call or workspace change. The validated result is
 persisted as its own append-only audit record and restored during audit replay.
 
-После валидации результата Alertmanager host может передать его в настроенные
-исходящие каналы. Адреса, идентификаторы получателей и имена переменных с
-секретами определяет оператор; alert, runbook и модель не могут выбрать URL или
-канал. Все получатели вызываются параллельно с отдельным ограничением времени.
-Ошибка доставки фиксируется в ответе и аудите, но не превращает уже успешное
-расследование в HTTP 5xx и не заставляет Alertmanager повторно запускать модель.
+After validating an alert result, the host can deliver it to configured
+outbound channels. The operator controls addresses, recipient identifiers, and
+secret-variable names; alerts, runbooks, and the model cannot select a URL or
+channel. Receivers run in parallel with individual timeouts. A delivery failure
+is recorded in audit but does not turn an already successful investigation into
+a retry of the model workflow.
 
-Telegram и Mattermost также могут работать как bidirectional chat adapters.
-Telegram получает updates через long polling либо provider-specific webhook;
-Mattermost использует outgoing webhook/slash command. Poller или webhook
-handler применяет operator allowlists до постановки сообщения в bounded queue;
-webhook дополнительно проверяет отдельный ingress secret. Worker хранит bounded
-in-memory history по provider/receiver/conversation, вызывает тот же read-only
-Chat loop и отправляет ответ через provider API. Bot ingress не публикует
-change Apply API и не получает дополнительных tools или permissions.
+Telegram and Mattermost can also act as bidirectional chat adapters. Telegram
+receives updates through long polling or a provider-specific webhook;
+Mattermost uses an outgoing webhook or slash command. The poller or webhook
+handler applies operator allowlists before placing a message in the bounded
+queue; webhooks also verify a separate ingress secret. A worker keeps bounded
+in-memory history by provider, receiver, and conversation, invokes the same
+read-only Chat loop, and replies through the provider API. Bot ingress does not
+expose the change Apply API or gain additional tools or permissions.
 
 Commit, push, and merge-request creation are outside the current trusted boundary.
 
-## Next Boundaries to Stabilize
-
-1. Add firing/resolved incident correlation above the generic run store.
-2. Define a versioned provider interface for an external incident/task backend.
-3. Add a separate policy for future write actions with two-phase approval.
+The alert store is a separate append-only journal for deliveries, normalized
+events, correlated incidents, and investigation jobs. The in-process worker
+claims pending jobs sequentially. On restart it returns interrupted `running`
+jobs to `pending`; a future external queue can replace this worker without
+changing the canonical event or adapter contracts.

@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"akritas/internal/alerts"
 	"akritas/internal/audit"
 	"akritas/internal/modeltext"
 	"akritas/internal/notifications"
@@ -54,6 +55,10 @@ type opsServer struct {
 	skillCatalog      *skills.Catalog
 	notifications     *notifications.Dispatcher
 	botGateway        *opsBotGateway
+	alertRegistry     *alerts.Registry
+	alertStore        *alerts.Store
+	alertWorker       *opsAlertWorker
+	publicURL         string
 }
 
 type opsChatAPIRequest struct {
@@ -164,12 +169,20 @@ func newOpsServer(
 func (server *opsServer) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", server.handleIndex)
+	mux.HandleFunc("GET /runs", server.handleIndex)
+	mux.HandleFunc("GET /runs/{id}", server.handleIndex)
 	mux.HandleFunc("GET /health", server.handleHealth)
 	mux.Handle("GET /api/v1/tools", server.authenticate(http.HandlerFunc(server.handleTools)))
 	mux.Handle("GET /api/v1/workspaces", server.authenticate(http.HandlerFunc(server.handleWorkspaces)))
 	mux.Handle("GET /api/v1/runs", server.authenticate(http.HandlerFunc(server.handleRuns)))
 	mux.Handle("GET /api/v1/runs/{id}", server.authenticate(http.HandlerFunc(server.handleRun)))
+	mux.Handle("POST /api/v1/runs/{id}/chat", server.authenticate(http.HandlerFunc(server.handleRunFollowUp)))
+	mux.Handle("GET /api/v1/incidents", server.authenticate(http.HandlerFunc(server.handleIncidents)))
+	mux.Handle("GET /api/v1/incidents/{id}", server.authenticate(http.HandlerFunc(server.handleIncident)))
+	mux.Handle("GET /api/v1/alert-events/{id}", server.authenticate(http.HandlerFunc(server.handleAlertEvent)))
+	mux.Handle("GET /api/v1/investigation-jobs/{id}", server.authenticate(http.HandlerFunc(server.handleInvestigationJob)))
 	mux.Handle("POST /api/v1/chat", server.authenticate(http.HandlerFunc(server.handleChatAPI)))
+	mux.HandleFunc("POST /api/v1/alerts/{source}/webhook", server.handleAlertWebhook)
 	mux.Handle("POST /api/v1/alertmanager/webhook", server.authenticate(http.HandlerFunc(server.handleAlertmanagerWebhook)))
 	mux.HandleFunc("POST /api/v1/bots/telegram/{receiver}/webhook", server.handleTelegramBotWebhook)
 	mux.HandleFunc("POST /api/v1/bots/mattermost/{receiver}/webhook", server.handleMattermostBotWebhook)
@@ -230,7 +243,7 @@ func (server *opsServer) authenticate(next http.Handler) http.Handler {
 }
 
 func (server *opsServer) handleIndex(writer http.ResponseWriter, request *http.Request) {
-	if request.URL.Path != "/" {
+	if request.URL.Path != "/" && request.URL.Path != "/runs" && !strings.HasPrefix(request.URL.Path, "/runs/") {
 		http.NotFound(writer, request)
 		return
 	}
@@ -255,6 +268,8 @@ func (server *opsServer) handleHealth(writer http.ResponseWriter, _ *http.Reques
 		"tools":             len(server.authorizedToolCatalog()),
 		"skills":            server.skillCatalog.Len(),
 		"bots":              botReceivers,
+		"alert_sources":     server.alertRegistry.Len(),
+		"alert_ingestion":   server.alertStore != nil,
 		"workspaces":        len(server.workspaces),
 	})
 }
@@ -324,7 +339,14 @@ func (server *opsServer) handleRuns(writer http.ResponseWriter, request *http.Re
 		}
 		limit = parsed
 	}
-	writeJSON(writer, http.StatusOK, map[string]any{"runs": server.auditStore.List(limit)})
+	runs := server.auditStore.List(limit)
+	for runIndex := range runs {
+		for eventIndex := range runs[runIndex].Events {
+			runs[runIndex].Events[eventIndex].Arguments = nil
+			runs[runIndex].Events[eventIndex].Result = nil
+		}
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"runs": runs})
 }
 
 func (server *opsServer) handleRun(writer http.ResponseWriter, request *http.Request) {

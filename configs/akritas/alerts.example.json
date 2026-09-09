@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "name": "alertmanager-main",
+      "type": "alertmanager",
+      "bearer_token_env": "AKRITAS_ALERTMANAGER_TOKEN"
+    }
+  ]
+}

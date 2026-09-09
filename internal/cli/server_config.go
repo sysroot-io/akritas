@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -33,6 +34,9 @@ type opsServerOptions struct {
 	RAGIndexPath              string
 	MCPConfigPath             string
 	NotificationsConfigPath   string
+	AlertSourcesConfigPath    string
+	AlertStorePath            string
+	PublicURL                 string
 	WorkspaceConfigPath       string
 	AuditLogPath              string
 	SearchTopK                int
@@ -65,6 +69,9 @@ type opsServerConfigFile struct {
 	RAGIndexPath              *string  `json:"rag_index,omitempty"`
 	MCPConfigPath             *string  `json:"mcp_config,omitempty"`
 	NotificationsConfigPath   *string  `json:"notifications_config,omitempty"`
+	AlertSourcesConfigPath    *string  `json:"alert_sources_config,omitempty"`
+	AlertStorePath            *string  `json:"alert_store,omitempty"`
+	PublicURL                 *string  `json:"public_url,omitempty"`
 	WorkspaceConfigPath       *string  `json:"workspace_config,omitempty"`
 	AuditLogPath              *string  `json:"audit_log,omitempty"`
 	SearchTopK                *int     `json:"search_top_k,omitempty"`
@@ -94,6 +101,7 @@ func defaultOpsServerOptions() opsServerOptions {
 		SkillsDirectory:           akritasskills.DefaultDirectory,
 		ResponseLanguage:          defaultResponseLanguage,
 		AuditLogPath:              "data/audit/akritas.jsonl",
+		AlertStorePath:            "data/audit/alerts.jsonl",
 		SearchTopK:                5,
 		ResultRunes:               800,
 		DefaultMaxTokens:          1024,
@@ -223,6 +231,9 @@ func applyOpsServerConfigFile(options *opsServerOptions, file opsServerConfigFil
 	applyString(&options.RAGIndexPath, file.RAGIndexPath)
 	applyString(&options.MCPConfigPath, file.MCPConfigPath)
 	applyString(&options.NotificationsConfigPath, file.NotificationsConfigPath)
+	applyString(&options.AlertSourcesConfigPath, file.AlertSourcesConfigPath)
+	applyString(&options.AlertStorePath, file.AlertStorePath)
+	applyString(&options.PublicURL, file.PublicURL)
 	applyString(&options.WorkspaceConfigPath, file.WorkspaceConfigPath)
 	applyString(&options.AuditLogPath, file.AuditLogPath)
 	applyInt(&options.SearchTopK, file.SearchTopK)
@@ -274,6 +285,9 @@ func applyOpsServerEnvironment(
 		"AKRITAS_RAG_INDEX":            &options.RAGIndexPath,
 		"AKRITAS_MCP_CONFIG":           &options.MCPConfigPath,
 		"AKRITAS_NOTIFICATIONS_CONFIG": &options.NotificationsConfigPath,
+		"AKRITAS_ALERT_SOURCES_CONFIG": &options.AlertSourcesConfigPath,
+		"AKRITAS_ALERT_STORE":          &options.AlertStorePath,
+		"AKRITAS_PUBLIC_URL":           &options.PublicURL,
 		"AKRITAS_WORKSPACE_CONFIG":     &options.WorkspaceConfigPath,
 		"AKRITAS_AUDIT_LOG":            &options.AuditLogPath,
 	}
@@ -354,6 +368,18 @@ func parseOpsServerEnvironmentList(value string) ([]string, error) {
 		return normalizedOpsServerList(values)
 	}
 	return normalizedOpsServerList(strings.Split(value, ","))
+}
+
+func normalizeOpsPublicURL(value string) (string, error) {
+	value = strings.TrimRight(strings.TrimSpace(value), "/")
+	if value == "" {
+		return "", nil
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("public_url must be an absolute HTTP(S) URL without query or fragment")
+	}
+	return value, nil
 }
 
 func normalizedOpsServerList(values []string) ([]string, error) {

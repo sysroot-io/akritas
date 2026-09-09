@@ -19,7 +19,7 @@ import (
 
 const (
 	storeVersion       = 1
-	maximumRecordBytes = 256 * 1024
+	maximumRecordBytes = 4 * 1024 * 1024
 	maximumMetadata    = 32
 	maximumValueRunes  = 512
 )
@@ -48,11 +48,13 @@ type Run struct {
 }
 
 type Event struct {
-	Sequence int               `json:"sequence"`
-	Time     time.Time         `json:"time"`
-	Type     string            `json:"type"`
-	Status   string            `json:"status,omitempty"`
-	Metadata map[string]string `json:"metadata,omitempty"`
+	Sequence  int               `json:"sequence"`
+	Time      time.Time         `json:"time"`
+	Type      string            `json:"type"`
+	Status    string            `json:"status,omitempty"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
+	Arguments json.RawMessage   `json:"arguments,omitempty"`
+	Result    json.RawMessage   `json:"result,omitempty"`
 }
 
 type record struct {
@@ -193,19 +195,37 @@ func (store *Store) StartRun(source, actor, workspace, model string, metadata ma
 }
 
 func (store *Store) AddEvent(runID, eventType, status string, metadata map[string]string) error {
+	return store.addEvent(runID, eventType, status, metadata, nil, nil, true)
+}
+
+func (store *Store) AddToolEvent(runID, status string, metadata map[string]string, arguments, result json.RawMessage) error {
+	return store.addEvent(runID, "tool_call", status, metadata, arguments, result, true)
+}
+
+func (store *Store) AddFollowUpEvent(runID, eventType, status string, metadata map[string]string, arguments, result json.RawMessage) error {
+	return store.addEvent(runID, eventType, status, metadata, arguments, result, false)
+}
+
+func (store *Store) addEvent(runID, eventType, status string, metadata map[string]string, arguments, result json.RawMessage, requireRunning bool) error {
 	if store == nil {
 		return fmt.Errorf("audit store is nil")
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	run := store.runs[runID]
-	if run == nil || run.Status != RunRunning {
+	if run == nil || (requireRunning && run.Status != RunRunning) {
 		return fmt.Errorf("audit run %q is not running", runID)
+	}
+	if len(arguments) > 0 && !json.Valid(arguments) {
+		return fmt.Errorf("audit event arguments are invalid JSON")
+	}
+	if len(result) > 0 && !json.Valid(result) {
+		return fmt.Errorf("audit event result is invalid JSON")
 	}
 	event := Event{
 		Sequence: len(run.Events) + 1, Time: time.Now().UTC(),
 		Type: boundedValue(strings.TrimSpace(eventType)), Status: boundedValue(status),
-		Metadata: sanitizedMetadata(metadata),
+		Metadata: sanitizedMetadata(metadata), Arguments: cloneJSON(arguments), Result: cloneJSON(result),
 	}
 	if event.Type == "" {
 		return fmt.Errorf("audit event type is empty")
@@ -381,7 +401,13 @@ func boundedValue(value string) string {
 
 func cloneEvent(event Event) Event {
 	event.Metadata = sanitizedMetadata(event.Metadata)
+	event.Arguments = cloneJSON(event.Arguments)
+	event.Result = cloneJSON(event.Result)
 	return event
+}
+
+func cloneJSON(value json.RawMessage) json.RawMessage {
+	return append(json.RawMessage(nil), value...)
 }
 
 func cloneRun(run *Run) *Run {
@@ -421,6 +447,7 @@ func cloneInvestigation(result *investigation.Result) *investigation.Result {
 	}
 	clone := *result
 	clone.Evidence = append([]string(nil), result.Evidence...)
+	clone.RuledOut = append([]string(nil), result.RuledOut...)
 	clone.AffectedComponents = append([]string(nil), result.AffectedComponents...)
 	clone.RecommendedActions = append([]string(nil), result.RecommendedActions...)
 	return &clone

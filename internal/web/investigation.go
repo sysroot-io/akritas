@@ -16,16 +16,19 @@ var investigationResultSchema = json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "finding_status": {"type": "string", "enum": ["confirmed", "suspected", "unknown"]},
+    "finding_status": {"type": "string", "enum": ["confirmed", "suspected", "inconclusive"]},
     "actionability": {"type": "string", "enum": ["proposal_possible", "requires_human", "no_action"]},
     "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
     "summary": {"type": "string", "minLength": 1, "maxLength": 4096},
     "hypothesis": {"type": "string", "maxLength": 4096},
+    "impact": {"type": "string", "maxLength": 4096},
     "evidence": {"type": "array", "maxItems": 64, "items": {"type": "string", "maxLength": 1024}},
+    "ruled_out": {"type": "array", "maxItems": 64, "items": {"type": "string", "maxLength": 1024}},
     "affected_components": {"type": "array", "maxItems": 64, "items": {"type": "string", "maxLength": 1024}},
-    "recommended_actions": {"type": "array", "maxItems": 64, "items": {"type": "string", "maxLength": 1024}}
+    "recommended_actions": {"type": "array", "maxItems": 64, "items": {"type": "string", "maxLength": 1024}},
+    "production_writes": {"type": "integer", "const": 0}
   },
-  "required": ["finding_status", "actionability", "confidence", "summary", "evidence", "affected_components", "recommended_actions"]
+  "required": ["finding_status", "actionability", "confidence", "summary", "impact", "evidence", "ruled_out", "affected_components", "recommended_actions", "production_writes"]
 }`)
 
 type investigationEvidenceItem struct {
@@ -58,7 +61,7 @@ func (server *opsServer) structureInvestigationResult(
 	if err != nil {
 		return investigation.Result{}, fmt.Errorf("encode investigation result input: %w", err)
 	}
-	systemPrompt := `Convert the investigation answer into the required structured result. Use only evidence references listed in host_owned_evidence. Evidence may be empty. Confidence is descriptive only and never authorizes an action. Call the required tool exactly once.` + "\n\n" + modeltext.LanguageInstruction(server.responseLanguage)
+	systemPrompt := `Convert the investigation answer into the required structured result. Use only evidence references listed in host_owned_evidence. Evidence and ruled_out may be empty. Set production_writes to zero; it is a host-enforced invariant. Confidence is descriptive only and never authorizes an action. Call the required tool exactly once.` + "\n\n" + modeltext.LanguageInstruction(server.responseLanguage)
 	definition := ToolDefinition{
 		Name:        investigationResultToolName,
 		Description: "Submit a structured investigation result for host validation.",

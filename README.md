@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 Akritas is a standalone host for LLM-powered operational automation. It accepts
-requests from people and Alertmanager, searches local context, invokes authorized
+requests from people and monitoring systems, searches local context, invokes authorized
 MCP tools, prepares verifiable file changes, and shows the actions that were
 actually performed.
 
@@ -25,8 +25,13 @@ Go 1.25 or later is required. The module selects the security-patched Go 1.26.6 
 
 ```bash
 go test ./...
+go test -tags=smoke -v ./tests/smoke
 go build -o bin/akritas ./cmd/akritas
 ```
+
+The tagged smoke suite builds and launches the real binary against a controlled
+OpenAI-compatible upstream, then verifies startup, authentication, the Web UI,
+alert ingestion, asynchronous investigation, Run retrieval, and deduplication.
 
 Basic startup with a local `llama-server`:
 
@@ -105,17 +110,21 @@ A version-controlled workspace configuration example is available at
 `configs/akritas/workspaces.example.json`. Local configurations containing
 internal paths or credentials are excluded from Git.
 
-Завершённые расследования, запущенные входящим webhook Alertmanager, можно
-отправлять одновременно в универсальный HTTP webhook, Telegram и Mattermost.
-Подключите строгий JSON-файл через `-notifications-config` или
-`AKRITAS_NOTIFICATIONS_CONFIG`; пример находится в
-`configs/akritas/notifications.example.json`. Токены ботов и секрет подписи
-читаются только из переменных окружения. Telegram long polling не требует
-публичного endpoint; webhook остаётся альтернативным режимом. Mattermost
-использует outgoing webhook/slash command. Оба адаптера передают сообщения
-пользователей в тот же Chat investigation loop. История хранится отдельно для
-каждого chat/topic или Mattermost channel, а команды `/new`, `/status` и
-`/help` управляют сессией.
+Completed alert investigations can be delivered simultaneously to a generic
+HTTP webhook, Telegram, and Mattermost. Configure receivers with
+`-notifications-config` or `AKRITAS_NOTIFICATIONS_CONFIG`; see
+`configs/akritas/notifications.example.json`. Bot tokens and signing secrets
+are read only from environment variables. Telegram long polling requires no
+public endpoint; webhook mode remains available. Mattermost uses an outgoing
+webhook or slash command. Both adapters pass user messages into the same Chat
+investigation loop. History is isolated by Telegram chat/topic or Mattermost
+channel, and `/new`, `/status`, and `/help` manage the session.
+
+Provider-neutral alert ingestion is configured separately with
+`-alert-sources-config` or `AKRITAS_ALERT_SOURCES_CONFIG`; see
+`configs/akritas/alerts.example.json`. Built-in adapters support the canonical
+Akritas contract, Alertmanager v4, Uptime Kuma, and Pingdom. Accepted events are
+durably deduplicated and correlated before an in-process worker starts a Run.
 
 ## VictoriaMetrics MCP
 
@@ -147,18 +156,20 @@ troubleshooting because error bodies can contain operational data.
 
 - Web UI and native API: `http://127.0.0.1:8090/`;
 - OpenAI-compatible facade: `/v1/models`, `/v1/chat/completions`;
-- Alertmanager webhook: `POST /api/v1/alertmanager/webhook`;
+- configured alert webhooks: `POST /api/v1/alerts/{source}/webhook`;
+- Alertmanager compatibility webhook: `POST /api/v1/alertmanager/webhook`;
 - outbound incident notifications: generic webhook, Telegram bot, and Mattermost bot;
 - bot chat ingress: Telegram long polling or webhook, and Mattermost webhook endpoints;
 - upstream LLM: any compatible `/v1`, including llama.cpp and OpenRouter;
 - external actions: MCP stdio servers with an explicit permissions policy;
 - metrics: bundled read-only VictoriaMetrics MCP adapter;
 - changes: isolated preview, validators, and one-time approval;
-- audit: authenticated `/api/v1/runs` list and detail endpoints.
+- audit: `/runs`, `/runs/{id}`, authenticated Run/incident APIs, and scoped follow-up chat.
 
 Startup, webhook, and API details are documented in
 `docs/operations/OPS_SERVER.md`; the change pipeline is documented in
-`docs/operations/CHANGE_SIMULATION.md`; component boundaries are documented in
+`docs/operations/CHANGE_SIMULATION.md`; the canonical monitoring contract is in
+`docs/operations/ALERT_CONTRACT.md`; component boundaries are documented in
 `docs/ARCHITECTURE.md`. See `docs/operations/DEPLOYMENT.md` for the hardened
 single-node Compose deployment, and `SECURITY.md` for security reporting and
 links to the security and threat models.

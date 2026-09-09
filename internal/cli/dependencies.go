@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"akritas/internal/alerts"
 	"akritas/internal/change"
 	"akritas/internal/clients/openai"
 	"akritas/internal/corpus"
@@ -90,11 +91,15 @@ type ToolRegistry = mcp.ToolRegistry
 type NamedToolPolicy = mcp.NamedToolPolicy
 type MCPHost = mcp.MCPHost
 type NotificationDispatcher = notifications.Dispatcher
+type AlertRegistry = alerts.Registry
+type AlertStore = alerts.Store
 
 var LoadMCPHostConfig = mcp.LoadMCPHostConfig
 var NewToolRegistry = mcp.NewToolRegistry
 var StartMCPHost = mcp.StartMCPHost
 var LoadNotificationDispatcher = notifications.Load
+var LoadAlertRegistry = alerts.LoadRegistry
+var OpenAlertStore = alerts.OpenStore
 
 const localRAGSearchToolName = rag.SearchToolName
 const localInvestigationPlanToolName = web.InvestigationPlanToolName

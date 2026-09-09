@@ -5,6 +5,7 @@ import (
 	"log"
 	"strconv"
 
+	"akritas/internal/alerts"
 	"akritas/internal/investigation"
 	"akritas/internal/notifications"
 )
@@ -13,6 +14,25 @@ func (server *opsServer) deliverIncidentNotifications(
 	ctx context.Context,
 	runID string,
 	webhook opsAlertmanagerWebhook,
+	result openAIToolLoopResult,
+	investigationResult investigation.Result,
+	activity []opsToolActivity,
+	capabilityGaps []opsCapabilityGap,
+) []notifications.DeliveryResult {
+	event := alerts.Event{
+		State: alerts.State(webhook.Status), CorrelationKey: webhook.GroupKey,
+		Name:   webhook.CommonLabels["alertname"],
+		Entity: alerts.Entity{Kind: "alert-group", ID: webhook.GroupKey},
+		Source: alerts.Source{Type: "alertmanager", Name: webhook.Receiver},
+	}
+	return server.deliverCanonicalIncidentNotifications(ctx, runID, "", event, result, investigationResult, activity, capabilityGaps)
+}
+
+func (server *opsServer) deliverCanonicalIncidentNotifications(
+	ctx context.Context,
+	runID string,
+	incidentID string,
+	event alerts.Event,
 	result openAIToolLoopResult,
 	investigationResult investigation.Result,
 	activity []opsToolActivity,
@@ -34,11 +54,20 @@ func (server *opsServer) deliverIncidentNotifications(
 		})
 	}
 	return server.notifications.Deliver(ctx, notifications.Incident{
-		RunID: runID, Model: server.modelID, AlertStatus: webhook.Status,
-		GroupKey: webhook.GroupKey, Answer: result.Answer, Skills: result.Skills,
+		RunID: runID, IncidentID: incidentID, Model: server.modelID,
+		AlertStatus: string(event.State), AlertName: event.Name, Entity: event.Entity.Kind + ":" + event.Entity.ID,
+		Source: event.Source.Type + ":" + event.Source.Name, GroupKey: event.CorrelationKey,
+		RunURL: server.runURL(runID), Answer: result.Answer, Skills: result.Skills,
 		Activity: notificationActivity, CapabilityGaps: notificationGaps,
 		Investigation: investigationResult, Budget: result.Tracker.Snapshot(),
 	})
+}
+
+func (server *opsServer) runURL(runID string) string {
+	if server == nil || server.publicURL == "" || runID == "" {
+		return ""
+	}
+	return server.publicURL + "/runs/" + runID
 }
 
 func (run *opsAuditRun) addNotificationEvents(results []notifications.DeliveryResult) {

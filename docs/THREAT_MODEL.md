@@ -54,13 +54,14 @@ Akritas host ---- OpenAI-compatible model (untrusted output)
 | Validator code execution | Opt-in profiles, fixed commands, offline Go settings, timeout, temp copy | Not an OS sandbox; direct network access remains possible |
 | Resource exhaustion | Host-owned Run budgets for duration, model calls, planned and adaptive tool calls, context, model tokens, and aggregate results; one generation slot; bounded MCP HTTP duration and response size; bounded pending approvals | Expensive metrics queries and other authorized requests can still consume resources up to configured backend and host limits |
 | Fabricated investigation evidence | Strict result schema and allowlisted host-created evidence references | A valid reference does not guarantee that the model interpreted the evidence correctly |
-| SSRF или утечка через исходящий webhook | URL и адресаты задаются только оператором в строгой bounded-конфигурации; alert и модель не управляют маршрутом; секреты остаются в environment | Компрометация конфигурации позволяет перенаправить операционные данные |
-| Упоминания и Markdown-инъекция в чат | Адаптеры используют фиксированный шаблон, нейтрализуют `@`, схлопывают переносы в полях и экранируют Mattermost Markdown | Текст модели остаётся недоверенным содержимым сообщения |
-| Повторный запуск расследования при сбое уведомления | Ошибка получателя возвращается как delivery status и audit event, но успешный Alertmanager Run остаётся HTTP 200 | Без внешнего outbox временный сбой может потерять уведомление |
-| Подделка входящего bot message | Telegram polling использует bot token через TLS; webhooks используют отдельный provider secret и constant-time comparison; оба режима применяют conversation/user allowlists и bounded payload | Компрометация bot/provider secret и allowlisted account позволяет отправлять запросы в Chat loop |
-| Telegram/Mattermost retry storm | Polling offset продвигается после queue acceptance; webhook update подтверждается до model execution; duplicate event IDs подавляются в bounded memory, full webhook queue отвечает 503 | Dedupe исчезает при restart; provider может повторить событие после restart |
-| Bot feedback loop | Telegram messages с `is_bot` игнорируются; Mattermost inbound требует explicit user allowlist; model output нейтрализует mentions | Ошибочная allowlist, содержащая Mattermost bot user, может вернуть loop |
-| Истощение памяти bot sessions | Bounded queue, history messages/bytes, session TTL, maximum session count, global generation slot | Allowlisted users могут занять очередь до configured bound |
+| SSRF or data leakage through an outbound webhook | URLs and recipients are operator-owned in strict bounded configuration; alerts and the model do not control routing; secrets remain in the environment | Configuration compromise can redirect operational data |
+| Mention or Markdown injection in chat | Adapters use a fixed template, neutralize `@`, collapse field line breaks, and escape Mattermost Markdown | Model text remains untrusted message content |
+| Investigation retry after notification failure | Receiver failure becomes a delivery status and audit event without retrying a successful investigation | Without an external outbox, a temporary failure can lose a notification |
+| Forged inbound bot message | Telegram polling uses the bot token over TLS; webhooks use a separate provider secret with constant-time comparison; both apply conversation/user allowlists and bounded payloads | Compromise of the bot/provider secret and an allowlisted account permits Chat-loop requests |
+| Telegram/Mattermost retry storm | Polling offset advances after queue acceptance; webhook updates are acknowledged before model execution; bounded-memory dedupe suppresses event IDs and a full queue returns 503 | Dedupe disappears on restart; the provider can repeat an event afterward |
+| Bot feedback loop | Telegram messages with `is_bot` are ignored; Mattermost requires an explicit user allowlist; model output neutralizes mentions | An incorrect allowlist containing the Mattermost bot user can restore a loop |
+| Bot-session memory exhaustion | Bounded queue, message/byte history, session TTL, session-count cap, and global generation slot | Allowlisted users can occupy the queue up to its configured bound |
+| Forged or replayed monitoring alert | Per-source Bearer, HMAC, or secret-header authentication; durable deduplication keys; strict provider adapters | A compromised source credential can submit believable alerts and consume investigation capacity |
 | Audit deletion or modification | Durable append-only application writes, restrictive volume permissions, backups | Host administrator can alter files; no signed log chain yet |
 | Compromised upstream model | No direct filesystem or production access; host validates every action | Model can provide deceptive advice or repeatedly invalid proposals |
 
@@ -77,4 +78,4 @@ operation. Test names should describe the threat they enforce.
 Revisit this threat model whenever Akritas changes global-instruction loading,
 adds write-capable tools, per-user
 authorization, remote workspaces, new validator profiles, network-accessible MCP
-transports, новый транспорт уведомлений, signed audit records, or multi-node deployment.
+transports, a new notification transport, signed audit records, or multi-node deployment.
