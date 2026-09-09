@@ -90,7 +90,9 @@ jobs:
       - name: Validate Compose configuration
         env:
           AKRITAS_API_KEY: container-smoke-key
-        run: docker compose config --quiet
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
 
       - name: Exercise container startup and API
         shell: bash
